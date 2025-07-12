@@ -1,13 +1,13 @@
 import torch
-from mmdet3d.datasets import build_dataset, build_dataloader
 import mmcv
 from functools import cached_property
 import prettytable
 from numpy.typing import NDArray
 from typing import Dict, Optional
 from logging import Logger
-from mmcv import Config
+from mmengine.config import Config
 from copy import deepcopy
+from mmengine.utils import track_iter_progress
 
 N_WORKERS = 16
 
@@ -20,6 +20,9 @@ class RasterEvaluate(object):
     """
 
     def __init__(self, dataset_cfg: Config, n_workers: int=N_WORKERS):
+        # 延迟导入，避免循环依赖
+        from mmdet3d.datasets import build_dataset, build_dataloader
+        
         self.dataset = build_dataset(dataset_cfg)
         self.dataloader = build_dataloader(
             self.dataset, samples_per_gpu=1, workers_per_gpu=n_workers, shuffle=False, dist=False)
@@ -31,7 +34,7 @@ class RasterEvaluate(object):
     def gts(self) -> Dict[str, NDArray]:
         print('collecting gts...')
         gts = {}
-        for data in mmcv.track_iter_progress(self.dataloader):
+        for data in track_iter_progress((self.dataloader, len(self.dataloader))):
             token = deepcopy(data['img_metas'].data[0][0]['token'])
             gt = deepcopy(data['semantic_mask'].data[0][0])
             gts[token] = gt
@@ -97,7 +100,7 @@ class RasterEvaluate(object):
             round(mIoU, 4)])
         
         if logger:
-            from mmcv.utils import print_log
+            from mmengine.logging import print_log
             print_log('\n'+str(table), logger=logger)
             print_log(f'mIoU = {mIoU:.4f}\n', logger=logger)
 

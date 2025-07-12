@@ -1,50 +1,33 @@
-from turtle import forward
-import warnings
-try:
-    from mmcv.ops.multi_scale_deform_attn import MultiScaleDeformableAttention
-except ImportError:
-    warnings.warn(
-        '`MultiScaleDeformableAttention` in MMCV has been moved to '
-        '`mmcv.ops.multi_scale_deform_attn`, please update your MMCV')
-    from mmcv.cnn.bricks.transformer import MultiScaleDeformableAttention
-from mmcv.runner import force_fp32, auto_fp16
-from mmcv.cnn.bricks.registry import ATTENTION
-
-
-from mmcv.runner.base_module import BaseModule, ModuleList, Sequential
-from mmcv.cnn.bricks.transformer import build_attention
-
 import math
 import warnings
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd.function import Function, once_differentiable
+from torch.amp import custom_bwd, custom_fwd
 
-from mmcv import deprecated_api_warning
-from mmcv.cnn import constant_init, xavier_init
-from mmcv.cnn.bricks.registry import ATTENTION
-from mmcv.runner import BaseModule
 from mmcv.utils import ext_loader
+from mmcv.ops.multi_scale_deform_attn import MultiScaleDeformableAttention
+from mmengine.model import BaseModule, constant_init, xavier_init
+from mmdet.registry import MODELS
+
+
 ext_module = ext_loader.load_ext(
     '_ext', ['ms_deform_attn_backward', 'ms_deform_attn_forward'])
-from torch.cuda.amp import custom_bwd, custom_fwd
 
 
-@ATTENTION.register_module()
+@MODELS.register_module()
 class MultiScaleDeformableAttentionFp16(BaseModule):
 
     def __init__(self, attn_cfg=None,init_cfg=None,**kwarg):
         super(MultiScaleDeformableAttentionFp16,self).__init__(init_cfg)
 
         # import ipdb; ipdb.set_trace()
-        self.deformable_attention = build_attention(attn_cfg)
+        self.deformable_attention = MODELS.build(attn_cfg)
         self.deformable_attention.init_weights()
         self.fp16_enabled = False
 
 
-    @force_fp32(apply_to=('query', 'key', 'value', 'query_pos', 'reference_points','identity'))
     def forward(self, query,
                 key=None,
                 value=None,
@@ -71,7 +54,7 @@ class MultiScaleDeformableAttentionFp16(BaseModule):
 class MultiScaleDeformableAttnFunctionFp32(Function):
 
     @staticmethod
-    @custom_fwd(cast_inputs=torch.float32)
+    @custom_fwd(cast_inputs=torch.float32, device_type='cuda')
     def forward(ctx, value, value_spatial_shapes, value_level_start_index,
                 sampling_locations, attention_weights, im2col_step):
         """GPU version of multi-scale deformable attention.
@@ -108,7 +91,7 @@ class MultiScaleDeformableAttnFunctionFp32(Function):
 
     @staticmethod
     @once_differentiable
-    @custom_bwd
+    @custom_bwd(device_type='cuda')
     def backward(ctx, grad_output):
         """GPU version of backward function.
         Args:
@@ -198,7 +181,7 @@ def multi_scale_deformable_attn_pytorch(value, value_spatial_shapes,
     return output.transpose(1, 2).contiguous()
 
 
-@ATTENTION.register_module()
+@MODELS.register_module()
 class MultiScaleDeformableAttentionFP32(BaseModule):
     """An attention module used in Deformable-Detr. `Deformable DETR:
     Deformable Transformers for End-to-End Object Detection.
@@ -292,8 +275,6 @@ class MultiScaleDeformableAttentionFP32(BaseModule):
         xavier_init(self.output_proj, distribution='uniform', bias=0.)
         self._is_init = True
 
-    @deprecated_api_warning({'residual': 'identity'},
-                            cls_name='MultiScaleDeformableAttention')
     def forward(self,
                 query,
                 key=None,

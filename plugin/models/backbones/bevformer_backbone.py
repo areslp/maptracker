@@ -2,13 +2,9 @@ import copy
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
-from mmdet.models import BACKBONES
-from mmcv.runner import force_fp32, auto_fp16
-from mmdet.models.utils import build_transformer
+from mmengine.registry import MODELS
 from mmcv.cnn.bricks.transformer import FFN, build_positional_encoding
 from .bevformer.grid_mask import GridMask
-from mmdet3d.models import builder
 from contextlib import nullcontext
 
 
@@ -39,7 +35,7 @@ class UpsampleBlock(nn.Module):
                           mode='bilinear', align_corners=True)
         return x
 
-@BACKBONES.register_module()
+@MODELS.register_module()
 class BEVFormerBackbone(nn.Module):
     """Head of Detr3D.
     Args:
@@ -76,9 +72,9 @@ class BEVFormerBackbone(nn.Module):
         self.use_grid_mask = use_grid_mask
 
         if img_backbone:
-            self.img_backbone = builder.build_backbone(img_backbone)
+            self.img_backbone = MODELS.build(img_backbone)
         if img_neck is not None:
-            self.img_neck = builder.build_neck(img_neck)
+            self.img_neck = MODELS.build(img_neck)
             self.with_img_neck = True
         else:
             self.with_img_neck = False
@@ -91,7 +87,7 @@ class BEVFormerBackbone(nn.Module):
     
         self.positional_encoding = build_positional_encoding(
             positional_encoding)
-        self.transformer = build_transformer(transformer)
+        self.transformer = MODELS.build(transformer)
         self.embed_dims = self.transformer.embed_dims
         
         self.upsample = upsample

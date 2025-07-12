@@ -1,14 +1,17 @@
+import warnings
+warnings.filterwarnings('ignore', category=DeprecationWarning)
 import argparse
 import mmcv
 import os
 import os.path as osp
 import torch
-import warnings
-from mmcv import Config, DictAction
+from mmengine.config import Config, DictAction
 from mmcv.cnn import fuse_conv_bn
-from mmcv.parallel import MMDataParallel, MMDistributedDataParallel
-from mmcv.runner import (get_dist_info, init_dist, load_checkpoint,
-                         wrap_fp16_model)
+from mmengine.model.wrappers import MMDistributedDataParallel
+from torch.nn import DataParallel as MMDataParallel
+from mmengine.dist import (get_dist_info, init_dist)
+from mmengine.runner import load_checkpoint
+from mmcv.runner import wrap_fp16_model
 
 from mmdet3d.apis import single_gpu_test
 from mmdet3d.datasets import build_dataset
@@ -17,6 +20,8 @@ from mmdet3d.models import build_model
 from mmdet_train import set_random_seed
 from mmdet.datasets import replace_ImageToTensor
 
+# Re-apply suppression in case other libraries reset warning filters
+warnings.filterwarnings('ignore', category=DeprecationWarning)
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -86,6 +91,8 @@ def parse_args():
         default='none',
         help='job launcher')
     parser.add_argument('--local_rank', type=int, default=0)
+    # Accept torch.distributed style "--local-rank" as silent alias
+    parser.add_argument('--local-rank', dest='local_rank', type=int, help=argparse.SUPPRESS)
     args = parser.parse_args()
     if 'LOCAL_RANK' not in os.environ:
         os.environ['LOCAL_RANK'] = str(args.local_rank)
@@ -221,6 +228,7 @@ def main():
     cfg.model.train_cfg = None
     model = build_model(cfg.model, test_cfg=cfg.get('test_cfg'))
     fp16_cfg = cfg.get('fp16', None)
+    print(f"fp16_cfg: {fp16_cfg}")
     if fp16_cfg is not None:
         wrap_fp16_model(model)
     checkpoint = load_checkpoint(model, args.checkpoint, map_location='cpu')
@@ -230,12 +238,18 @@ def main():
         model = fuse_conv_bn(model)
     if not distributed:
         model = MMDataParallel(model, device_ids=[0])
+        for n, p in model.named_parameters():
+            if p.dtype != torch.float32:
+                print('[FP16?]', n, p.dtype)
         outputs = single_gpu_test(model, data_loader, args.show, args.show_dir)
     else:
         model = MMDistributedDataParallel(
             model.cuda(),
             device_ids=[torch.cuda.current_device()],
             broadcast_buffers=False)
+        for n, p in model.named_parameters():
+            if p.dtype != torch.float32:
+                print('[FP16?]', n, p.dtype)
         outputs = multi_gpu_test(model, data_loader, args.tmpdir,
                                 args.gpu_collect)
 

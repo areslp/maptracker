@@ -1,8 +1,7 @@
 import argparse
-import mmcv
-from mmcv import Config
+from mmengine import Config
 import os
-from mmdet3d.datasets import build_dataset, build_dataloader
+from mmengine.registry import DATASETS
 import cv2
 import torch
 import numpy as np
@@ -22,7 +21,14 @@ fontColor              = (255,0,0)
 thickness              = 2
 lineType               = 2
 
-N_WORKERS = 16
+# NOTE: The number of worker processes used for parallel processing was
+# previously hard-coded to 16.  This occasionally led to dead-locks on some
+# platforms because the heavy ``dataset`` object has to be serialized and
+# passed to the subprocesses.  We therefore expose it as a command-line
+# argument (``--num-workers``) and default to **0** which means running in
+# the main process.  Users can still set a positive value if their platform
+# handles the fork safely.
+N_WORKERS = 0
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -41,6 +47,12 @@ def parse_args():
         action="store_true",
         default=False,
         help='whether visualize the formed gt tracks')
+    parser.add_argument(
+        '--num-workers',
+        type=int,
+        default=N_WORKERS,
+        help=('Number of worker processes used to parallelize track ' 
+              'generation. 0 means running in the main process (safer).'))
     args = parser.parse_args()
 
     return args
@@ -349,8 +361,8 @@ def main():
         if split == 'val' and split not in cfg.match_config.ann_file:
             cfg.match_config.ann_file = cfg.match_config.ann_file.replace('train', 'val')
 
-        # build the dataset
-        dataset = build_dataset(cfg.match_config)
+        # build the dataloader
+        dataset = DATASETS.build(cfg.match_config)
 
         scene_name2idx = {}
         for idx, sample in enumerate(dataset.samples):
@@ -370,12 +382,13 @@ def main():
         for scene_idx, scene_name in enumerate(all_scene_names):
             all_scene_infos.append((scene_name,))
             
-        if N_WORKERS > 0:
+        if args.num_workers > 0:
             fn = partial(form_gt_track_single, scene_name2idx=scene_name2idx,
                 dataset=dataset, cfg=cfg, out_dir=out_dir, args=args)
-            pool = Pool(N_WORKERS)
+            pool = Pool(args.num_workers)
             matching_results = pool.starmap(fn, all_scene_infos)
             pool.close()
+            pool.join()
         else:
             matching_results =[]
             for scene_info in all_scene_infos:

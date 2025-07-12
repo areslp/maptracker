@@ -1,10 +1,10 @@
 import torch
 import torch.nn as nn
-from mmdet.models import NECKS
-from mmcv.cnn.utils import kaiming_init, constant_init
+from mmdet.registry import MODELS
+from mmengine.model import kaiming_init, constant_init
 
 
-@NECKS.register_module()
+@MODELS.register_module()
 class ConvGRU(nn.Module):
     def __init__(self, out_channels):
         super(ConvGRU, self).__init__()

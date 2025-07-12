@@ -13,19 +13,24 @@ import os
 import time
 import torch
 import warnings
-from mmcv import Config, DictAction
-from mmcv.runner import get_dist_info, init_dist, wrap_fp16_model
+from mmengine.config import Config, DictAction
+from mmengine.dist import get_dist_info, init_dist
 from os import path as osp
 
 from mmdet import __version__ as mmdet_version
 from mmdet3d import __version__ as mmdet3d_version
-from mmdet3d.apis import train_model
+# NOTE: `train_model` has been superseded by custom training logic in
+# `plugin.core.apis.custom_train_model`. The original import from
+# `mmdet3d.apis` is removed to maintain compatibility with newer
+# MMDetection3D versions where `train_model` has been deprecated.
 from mmdet3d.datasets import build_dataset
 from mmdet3d.models import build_model
-from mmdet3d.utils import collect_env, get_root_logger
-from mmdet.apis import set_random_seed
+from mmdet.utils import collect_env, get_root_logger
 from mmseg import __version__ as mmseg_version
-from mmcv.utils import TORCH_VERSION, digit_version
+from mmengine.utils.dl_utils import TORCH_VERSION
+from mmengine.utils import digit_version
+from mmengine.runner import set_random_seed  # New unified API location
+from mmengine.utils import mkdir_or_exist
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Train a detector')
@@ -77,6 +82,8 @@ def parse_args():
         default='none',
         help='job launcher')
     parser.add_argument('--local_rank', type=int, default=0)
+    # Accept torch.distributed style "--local-rank" as silent alias
+    parser.add_argument('--local-rank', dest='local_rank', type=int, help=argparse.SUPPRESS)
     parser.add_argument(
         '--autoscale-lr',
         action='store_true',
@@ -99,6 +106,14 @@ def parse_args():
 def main():
     args = parse_args()
 
+    # --- Suppress specific DeprecationWarning from mmengine ---
+    warnings.filterwarnings(
+        "ignore",
+        category=DeprecationWarning,
+        message=r"`TorchScript` support for functional optimizers is deprecated.*",
+    )
+    # --- End Warning Suppression ---
+
     cfg = Config.fromfile(args.config)
     if args.cfg_options is not None:
         cfg.merge_from_dict(args.cfg_options)
@@ -110,6 +125,15 @@ def main():
     # set cudnn_benchmark
     if cfg.get('cudnn_benchmark', False):
         torch.backends.cudnn.benchmark = True
+
+    # -------------------------------------------------------------
+    # Initialize the global registry default scope BEFORE importing
+    # any plugin modules or building models/datasets. This ensures
+    # that components registered under the specified scope (e.g.,
+    # "mmdet") can be discovered correctly during build_model.
+    # -------------------------------------------------------------
+    from mmengine.registry import init_default_scope
+    init_default_scope(cfg.get('default_scope', 'mmdet'))
 
     # import modules from plguin/xx, registry will be updated
     import sys
@@ -169,13 +193,14 @@ def main():
         distributed = False
     else:
         distributed = True
-        init_dist(args.launcher, **cfg.dist_params)
+        dist_cfg = cfg.get('env_cfg', {}).get('dist_cfg', {})
+        init_dist(args.launcher, **dist_cfg)
         # re-set gpu_ids with distributed training mode
         _, world_size = get_dist_info()
         cfg.gpu_ids = range(world_size)
 
     # create work_dir
-    mmcv.mkdir_or_exist(osp.abspath(cfg.work_dir))
+    mkdir_or_exist(osp.abspath(cfg.work_dir))
     # dump config
     cfg.dump(osp.join(cfg.work_dir, osp.basename(args.config)))
     # init the logger before other steps
@@ -189,7 +214,7 @@ def main():
     else:
         logger_name = 'mmdet'
     logger = get_root_logger(
-        log_file=log_file, log_level=cfg.log_level, name=logger_name)
+        log_file=log_file, log_level=cfg.log_level)
 
     # init the meta dict to record some important information such as
     # environment info and seed, which will be logged
@@ -244,17 +269,17 @@ def main():
         # refer to https://mmdetection3d.readthedocs.io/en/latest/tutorials/customize_runtime.html#customize-workflow  # noqa
         val_dataset.test_mode = False
         datasets.append(build_dataset(val_dataset))
-    if cfg.checkpoint_config is not None:
-        # save mmdet version, config file content and class names in
-        # checkpoints as meta data
-        cfg.checkpoint_config.meta = dict(
+    # Attach meta information to the checkpoint hook (MMEngine style)
+    ckpt_hook = cfg.get('default_hooks', {}).get('checkpoint', None)
+    if ckpt_hook is not None:
+        ckpt_hook['meta'] = dict(
             mmdet_version=mmdet_version,
             mmseg_version=mmseg_version,
             mmdet3d_version=mmdet3d_version,
             config=cfg.pretty_text,
             CLASSES=None,
-            PALETTE=datasets[0].PALETTE  # for segmentors
-            if hasattr(datasets[0], 'PALETTE') else None)
+            PALETTE=datasets[0].PALETTE if hasattr(datasets[0], 'PALETTE') else None
+        )
     # add an attribute for visualization convenience
     # model.CLASSES = datasets[0].CLASSES
     from plugin.core.apis import custom_train_model

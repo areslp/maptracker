@@ -5,23 +5,18 @@ import copy
 
 import torch
 import torch.nn as nn
-from mmcv.cnn import build_activation_layer, build_norm_layer, xavier_init
-from mmcv.cnn.bricks.registry import (TRANSFORMER_LAYER,
-                                      TRANSFORMER_LAYER_SEQUENCE)
-from mmcv.cnn.bricks.transformer import (BaseTransformerLayer,
-                                         TransformerLayerSequence,
-                                         build_transformer_layer)
-from mmcv.runner.base_module import BaseModule, ModuleList
-
-from mmdet.models.utils.builder import TRANSFORMER
-
-from mmdet.models.utils.transformer import Transformer
+from mmengine.model import BaseModule, ModuleList, xavier_init
+from mmdet.registry import MODELS
+from mmcv.cnn.bricks.transformer import BaseTransformerLayer
 
 from .CustomMSDeformableAttention import CustomMSDeformableAttention
-from mmdet.models.utils.transformer import inverse_sigmoid
+from mmdet.models.layers.transformer import inverse_sigmoid
+
+# Reuse legacy Transformer implementation for common utilities
+from legacy.transformer import Transformer as _LegacyTransformer
 
     
-@TRANSFORMER_LAYER_SEQUENCE.register_module()
+@MODELS.register_module()
 class MapTransformerDecoder_new(BaseModule):
     """Implements the decoder in DETR transformer.
     Args:
@@ -48,7 +43,7 @@ class MapTransformerDecoder_new(BaseModule):
         self.num_layers = num_layers
         self.layers = ModuleList()
         for i in range(num_layers):
-            self.layers.append(build_transformer_layer(transformerlayers[i]))
+            self.layers.append(MODELS.build(transformerlayers[i]))
         self.embed_dims = self.layers[0].embed_dims
         self.pre_norm = self.layers[0].pre_norm
         self.return_intermediate = return_intermediate
@@ -133,7 +128,7 @@ class MapTransformerDecoder_new(BaseModule):
 
         return output, reference_points
 
-@TRANSFORMER_LAYER.register_module()
+@MODELS.register_module()
 class MapTransformerLayer(BaseTransformerLayer):
     """Base `TransformerLayer` for vision transformer.
 
@@ -342,8 +337,8 @@ class MapTransformerLayer(BaseTransformerLayer):
 
         return query
 
-@TRANSFORMER.register_module()
-class MapTransformer(Transformer):
+@MODELS.register_module()
+class MapTransformer(_LegacyTransformer):
     """Implements the DeformableDETR transformer.
     Args:
         as_two_stage (bool): Generate query from encoder features.

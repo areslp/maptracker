@@ -1,5 +1,6 @@
 import numpy as np
-from mmdet.datasets.builder import PIPELINES
+from mmcv.transforms import BaseTransform
+from mmdet.registry import TRANSFORMS
 from shapely.geometry import LineString, Polygon
 from shapely import affinity
 import cv2
@@ -10,8 +11,8 @@ import torch
 
 import pdb
 
-@PIPELINES.register_module(force=True)
-class RasterizeMap(object):
+@TRANSFORMS.register_module(force=True)
+class RasterizeMap(BaseTransform):
     """Generate rasterized semantic map and put into 
     `semantic_mask` key.
 
@@ -29,7 +30,7 @@ class RasterizeMap(object):
                  coords_dim: int,
                  semantic_mask=False,
                  ):
-
+        super().__init__()
         self.roi_size = roi_size
         self.canvas_size = canvas_size
         self.scale_x = self.canvas_size[0] / self.roi_size[0]
@@ -149,7 +150,7 @@ class RasterizeMap(object):
         else:
             return instance_masks
 
-    def __call__(self, input_dict: Dict) -> Dict:
+    def transform(self, input_dict: Dict) -> Dict:
         map_geoms = input_dict['map_geoms'] # {0: List[ped_crossing: LineString], 1: ...}
 
         semantic_mask = self.get_semantic_mask(map_geoms)
@@ -166,8 +167,8 @@ class RasterizeMap(object):
         return repr_str
 
 
-@PIPELINES.register_module(force=True)
-class PV_Map(object):
+@TRANSFORMS.register_module(force=True)
+class PV_Map(BaseTransform):
     """Generate rasterized semantic map and put into 
     `semantic_mask` key.
 
@@ -187,7 +188,7 @@ class PV_Map(object):
                  num_cams=6,
                  num_coords=2
                  ):
-
+        super().__init__()
         self.num_cams = num_cams
         self.num_coords = num_coords
         self.img_shape = img_shape
@@ -314,7 +315,7 @@ class PV_Map(object):
         else:
             return instance_masks
 
-    def __call__(self, input_dict: Dict) -> Dict:
+    def transform(self, input_dict: Dict) -> Dict:
         map_geoms = input_dict['map_geoms'] # {0: List[ped_crossing: LineString], 1: ...}
         pv_mask = self.get_pvmask(map_geoms, input_dict['ego2img'], input_dict['img_filenames'])
         input_dict['pv_mask'] =  pv_mask # (num_class, canvas_size[1], canvas_size[0])

@@ -266,7 +266,7 @@ model = dict(
 # data processing pipelines
 train_pipeline = [
     dict(
-        type='VectorizeMap',
+        type='mmdet.VectorizeMap',
         coords_dim=coords_dim,
         roi_size=roi_size,
         sample_num=num_points,
@@ -274,38 +274,38 @@ train_pipeline = [
         permute=permute,
     ),
     dict(
-        type='RasterizeMap',   
+        type='mmdet.RasterizeMap',   
         roi_size=roi_size,
         coords_dim=coords_dim,
         canvas_size=canvas_size,
         thickness=thickness,
         semantic_mask=True,
     ),
-    dict(type='LoadMultiViewImagesFromFiles', to_float32=True),
-    dict(type='PhotoMetricDistortionMultiViewImage'),
-    dict(type='ResizeMultiViewImages',
+    dict(type='mmdet.LoadMultiViewImagesFromFiles', to_float32=True),
+    dict(type='mmdet.PhotoMetricDistortionMultiViewImage'),
+    dict(type='mmdet.ResizeMultiViewImages',
          size=img_size, # H, W
          change_intrinsics=True,
          ),
-    dict(type='Normalize3D', **img_norm_cfg),
-    dict(type='PadMultiViewImages', size_divisor=32),
-    dict(type='FormatBundleMap'),
-    dict(type='Collect3D', keys=['img', 'vectors', 'semantic_mask'], meta_keys=(
+    dict(type='mmdet.Normalize3D', **img_norm_cfg),
+    dict(type='mmdet.PadMultiViewImages', size_divisor=32),
+    dict(type='mmdet.FormatBundleMap'),
+    dict(type='mmdet.Collect3D', keys=['img', 'vectors', 'semantic_mask'], meta_keys=(
         'token', 'ego2img', 'sample_idx', 'ego2global_translation',
         'ego2global_rotation', 'img_shape', 'scene_name'))
 ]
 
 # data processing pipelines
 test_pipeline = [
-    dict(type='LoadMultiViewImagesFromFiles', to_float32=True),
-    dict(type='ResizeMultiViewImages',
+    dict(type='mmdet.LoadMultiViewImagesFromFiles', to_float32=True),
+    dict(type='mmdet.ResizeMultiViewImages',
          size=img_size, # H, W
          change_intrinsics=True,
          ),
-    dict(type='Normalize3D', **img_norm_cfg),
-    dict(type='PadMultiViewImages', size_divisor=32),
-    dict(type='FormatBundleMap'),
-    dict(type='Collect3D', keys=['img'], meta_keys=(
+    dict(type='mmdet.Normalize3D', **img_norm_cfg),
+    dict(type='mmdet.PadMultiViewImages', size_divisor=32),
+    dict(type='mmdet.FormatBundleMap'),
+    dict(type='mmdet.Collect3D', keys=['img'], meta_keys=(
         'token', 'ego2img', 'sample_idx', 'ego2global_translation',
         'ego2global_rotation', 'img_shape', 'scene_name'))
 ]
@@ -313,7 +313,7 @@ test_pipeline = [
 # configs for evaluation code
 # DO NOT CHANGE
 eval_config = dict(
-    type='NuscDataset',
+    type='mmdet.NuscDataset',
     data_root='./datasets/nuscenes',
     ann_file='./datasets/nuscenes/nuscenes_map_infos_val.pkl',
     meta=meta,
@@ -321,30 +321,30 @@ eval_config = dict(
     cat2id=cat2id,
     pipeline=[
         dict(
-            type='VectorizeMap',
+            type='mmdet.VectorizeMap',
             coords_dim=coords_dim,
             simplify=True,
             normalize=False,
             roi_size=roi_size
         ),
         dict(
-            type='RasterizeMap',   
+            type='mmdet.RasterizeMap',   
             roi_size=roi_size,
             coords_dim=coords_dim,
             canvas_size=canvas_size,
             thickness=thickness,
             semantic_mask=True,
         ),
-        dict(type='FormatBundleMap'),
-        dict(type='Collect3D', keys=['vectors', 'semantic_mask'], meta_keys=['token', 'ego2img', 'sample_idx', 'ego2global_translation',
+        dict(type='mmdet.FormatBundleMap'),
+        dict(type='mmdet.Collect3D', keys=['vectors', 'semantic_mask'], meta_keys=['token', 'ego2img', 'sample_idx', 'ego2global_translation',
         'ego2global_rotation', 'img_shape', 'scene_name'])
     ],
-    interval=1,
+    interval=1
 )
 
 
 match_config = dict(
-    type='NuscDataset',
+    type='mmdet.NuscDataset',
     data_root='./datasets/nuscenes',
     ann_file='./datasets/nuscenes/nuscenes_map_infos_val.pkl',
     meta=meta,
@@ -352,7 +352,7 @@ match_config = dict(
     cat2id=cat2id,
     pipeline=[
         dict(
-            type='VectorizeMap',
+            type='mmdet.VectorizeMap',
             coords_dim=coords_dim,
             simplify=False,
             normalize=True,
@@ -360,14 +360,14 @@ match_config = dict(
             sample_num=num_points,
         ),
         dict(
-            type='RasterizeMap',   
+            type='mmdet.RasterizeMap',   
             roi_size=roi_size,
             coords_dim=coords_dim,
             canvas_size=canvas_size,
             thickness=thickness,
         ),
-        dict(type='FormatBundleMap'),
-        dict(type='Collect3D', keys=['vectors', 'semantic_mask'], meta_keys=['token', 'ego2img', 'ego2cam', 'sample_idx', 'ego2global_translation',
+        dict(type='mmdet.FormatBundleMap'),
+        dict(type='mmdet.Collect3D', keys=['vectors', 'semantic_mask'], meta_keys=['token', 'ego2img', 'ego2cam', 'sample_idx', 'ego2global_translation',
         'ego2global_rotation', 'img_shape', 'scene_name', 'img_filenames', 'cam_intrinsics', 'cam_extrinsics', 'lidar2ego_translation', 
         'lidar2ego_rotation'])
     ],
@@ -379,7 +379,7 @@ data = dict(
     samples_per_gpu=batch_size,
     workers_per_gpu=8,
     train=dict(
-        type='NuscDataset',
+        type='mmdet.NuscDataset',
         data_root='./datasets/nuscenes',
         ann_file='./datasets/nuscenes/nuscenes_map_infos_train.pkl',
         meta=meta,
@@ -392,7 +392,7 @@ data = dict(
         sampling_span=10,
     ),
     val=dict(
-        type='NuscDataset',
+        type='mmdet.NuscDataset',
         data_root='./datasets/nuscenes',
         ann_file='./datasets/nuscenes/nuscenes_map_infos_val.pkl',
         meta=meta,
@@ -405,7 +405,7 @@ data = dict(
         eval_semantic=True,
     ),
     test=dict(
-        type='NuscDataset',
+        type='mmdet.NuscDataset',
         data_root='./datasets/nuscenes',
         ann_file='./datasets/nuscenes/nuscenes_map_infos_val.pkl',
         meta=meta,
@@ -441,15 +441,16 @@ lr_config = dict(
     min_lr_ratio=5e-2)
 
 evaluation = dict(interval=num_epochs_interval*num_iters_per_epoch)
-#evaluation = dict(interval=1) # for debugging use..
+# evaluation = dict(interval=40) # for debugging use..
 find_unused_parameters = True #### when use checkpoint, find_unused_parameters must be False
-checkpoint_config = dict(interval=num_epochs_interval*num_iters_per_epoch)
+# checkpoint_config = dict(interval=num_epochs_interval*num_iters_per_epoch)
+checkpoint_config = dict(interval=5000, by_epoch=False)
 
 runner = dict(
     type='MyRunnerWrapper', max_iters=num_epochs * num_iters_per_epoch)
 
 log_config = dict(
-    interval=50,
+    interval=10,
     hooks=[
         dict(type='TextLoggerHook'),
         dict(type='TensorboardLoggerHook')

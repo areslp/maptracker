@@ -2,7 +2,7 @@ import math
 import torch
 import torch.nn as nn 
 import numpy as np
-from mmcv.cnn import bias_init_with_prob, xavier_init
+from mmengine.model import bias_init_with_prob, xavier_init
 
 
 class Embedder:

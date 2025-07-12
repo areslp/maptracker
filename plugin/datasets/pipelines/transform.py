@@ -1,11 +1,12 @@
 import numpy as np
 import mmcv
 
-from mmdet.datasets.builder import PIPELINES
+from mmcv.transforms import BaseTransform
+from mmdet.registry import TRANSFORMS
 from numpy import random
 
-@PIPELINES.register_module(force=True)
-class Normalize3D(object):
+@TRANSFORMS.register_module(force=True)
+class Normalize3D(BaseTransform):
     """Normalize the image.
     Added key is "img_norm_cfg".
     Args:
@@ -16,11 +17,12 @@ class Normalize3D(object):
     """
 
     def __init__(self, mean, std, to_rgb=True):
+        super().__init__()
         self.mean = np.array(mean, dtype=np.float32)
         self.std = np.array(std, dtype=np.float32)
         self.to_rgb = to_rgb
 
-    def __call__(self, results):
+    def transform(self, results):
         """Call function to normalize images.
         Args:
             results (dict): Result dict from loading pipeline.
@@ -41,8 +43,8 @@ class Normalize3D(object):
         return repr_str
 
 
-@PIPELINES.register_module(force=True)
-class PadMultiViewImages(object):
+@TRANSFORMS.register_module(force=True)
+class PadMultiViewImages(BaseTransform):
     """Pad multi-view images and change intrinsics
     There are two padding modes: (1) pad to a fixed size and (2) pad to the
     minimum size that is divisible by some number.
@@ -57,6 +59,7 @@ class PadMultiViewImages(object):
     """
 
     def __init__(self, size=None, size_divisor=None, pad_val=0, change_intrinsics=False):
+        super().__init__()
         self.size = size
         self.size_divisor = size_divisor
         self.pad_val = pad_val
@@ -106,7 +109,7 @@ class PadMultiViewImages(object):
         results['img_fixed_size'] = self.size
         results['img_size_divisor'] = self.size_divisor
 
-    def __call__(self, results):
+    def transform(self, results):
         """Call function to pad images, masks, semantic segmentation maps.
         Args:
             results (dict): Result dict from loading pipeline.
@@ -126,8 +129,8 @@ class PadMultiViewImages(object):
         return repr_str
 
 
-@PIPELINES.register_module(force=True)
-class ResizeMultiViewImages(object):
+@TRANSFORMS.register_module(force=True)
+class ResizeMultiViewImages(BaseTransform):
     """Resize mulit-view images and change intrinsics
     If set `change_intrinsics=True`, key 'cam_intrinsics' and 'ego2img' will be changed
 
@@ -136,12 +139,13 @@ class ResizeMultiViewImages(object):
         change_intrinsics (bool): whether to update intrinsics.
     """
     def __init__(self, size=None, scale=None, change_intrinsics=True):
+        super().__init__()
         self.size = size
         self.scale = scale
         assert size is None or scale is None
         self.change_intrinsics = change_intrinsics
 
-    def __call__(self, results:dict):
+    def transform(self, results:dict):
 
         new_imgs, post_intrinsics, post_ego2imgs = [], [], []
 
@@ -189,8 +193,8 @@ class ResizeMultiViewImages(object):
         return repr_str
     
 
-@PIPELINES.register_module()
-class PhotoMetricDistortionMultiViewImage:
+@TRANSFORMS.register_module()
+class PhotoMetricDistortionMultiViewImage(BaseTransform):
     """Apply photometric distortion to image sequentially, every transformation
     is applied with a probability of 0.5. The position of random contrast is in
     second or second to last.
@@ -214,12 +218,13 @@ class PhotoMetricDistortionMultiViewImage:
                  contrast_range=(0.5, 1.5),
                  saturation_range=(0.5, 1.5),
                  hue_delta=18):
+        super().__init__()
         self.brightness_delta = brightness_delta
         self.contrast_lower, self.contrast_upper = contrast_range
         self.saturation_lower, self.saturation_upper = saturation_range
         self.hue_delta = hue_delta
 
-    def __call__(self, results):
+    def transform(self, results):
         """Call function to perform photometric distortion on images.
         Args:
             results (dict): Result dict from loading pipeline.

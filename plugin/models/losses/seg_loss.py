@@ -3,7 +3,7 @@ from torch import nn as nn
 from torch.nn import functional as F
 import mmcv
 
-from mmdet.models.builder import LOSSES
+from mmdet.registry import MODELS
 from mmdet.models.losses import FocalLoss, weight_reduce_loss
 
 from einops import rearrange
@@ -57,7 +57,7 @@ def py_sigmoid_focal_loss(pred,
     return loss
 
 
-@LOSSES.register_module()
+@MODELS.register_module()
 class MaskFocalLoss(FocalLoss):
     def __init__(self,**kwargs):
         super(MaskFocalLoss, self).__init__(**kwargs)
@@ -90,7 +90,7 @@ class MaskFocalLoss(FocalLoss):
         return loss * self.loss_weight
 
 
-@LOSSES.register_module()
+@MODELS.register_module()
 class MaskDiceLoss(nn.Module):
     """Dice Loss PyTorch
         Created by: Zhang Shuai

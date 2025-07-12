@@ -1,8 +1,8 @@
 import torch
 import torch.nn as nn
 from typing import Optional, Sequence, Tuple, Union
-from mmdet.models import NECKS
-from mmcv.cnn.utils import kaiming_init, constant_init
+from mmengine.registry import MODELS
+from mmengine.model import kaiming_init, constant_init
 from mmcv.cnn.resnet import conv3x3
 from torch import Tensor
 
@@ -44,7 +44,7 @@ class MyResBlock(nn.Module):
         return out
 
 
-@NECKS.register_module()
+@MODELS.register_module()
 class TemporalNet(nn.Module):
     def __init__(self, history_steps, hidden_dims, num_blocks):
         super(TemporalNet, self).__init__()

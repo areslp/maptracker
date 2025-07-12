@@ -1,11 +1,12 @@
 import numpy as np
-from mmdet.datasets.builder import PIPELINES
+from mmcv.transforms import BaseTransform
+from mmdet.registry import TRANSFORMS
 from shapely.geometry import LineString
 from numpy.typing import NDArray
 from typing import List, Tuple, Union, Dict
 
-@PIPELINES.register_module(force=True)
-class VectorizeMap(object):
+@TRANSFORMS.register_module(force=True)
+class VectorizeMap(BaseTransform):
     """Generate vectoized map and put into `semantic_mask` key.
     Concretely, shapely geometry objects are converted into sample points (ndarray).
     We use args `sample_num`, `sample_dist`, `simplify` to specify sampling method.
@@ -29,6 +30,7 @@ class VectorizeMap(object):
                  sample_dist: float=-1, 
                  permute: bool=False
         ):
+        super().__init__()
         self.coords_dim = coords_dim
         self.sample_num = sample_num
         self.sample_dist = sample_dist
@@ -173,7 +175,7 @@ class VectorizeMap(object):
         
         return permute_lines_array
     
-    def __call__(self, input_dict):
+    def transform(self, input_dict):
         map_geoms = input_dict['map_geoms']
 
         input_dict['vectors'] = self.get_vectorized_lines(map_geoms)

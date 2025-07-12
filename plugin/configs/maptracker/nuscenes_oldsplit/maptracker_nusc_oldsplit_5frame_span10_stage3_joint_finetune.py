@@ -2,6 +2,8 @@ _base_ = [
     '../../_base_/default_runtime.py'
 ]
 
+default_scope = 'mmdet'
+
 # model type
 type = 'Mapper'
 plugin = True
@@ -409,10 +411,64 @@ data = dict(
     nonshuffler_sampler=dict(type='DistributedSampler')
 )
 
-# optimizer
-optimizer = dict(
-    type='AdamW',
-    lr=5e-4,
+train_dataloader = dict(
+    batch_size=batch_size,
+    num_workers=data['workers_per_gpu'],
+    persistent_workers=True,
+    sampler=data['shuffler_sampler'],
+    dataset=dict(
+        type='NuscDataset',
+        data_root='./datasets/nuscenes',
+        ann_file='./datasets/nuscenes/nuscenes_map_infos_train.pkl',
+        meta=meta,
+        roi_size=roi_size,
+        cat2id=cat2id,
+        pipeline=train_pipeline,
+        seq_split_num=-2,
+        matching=True,
+        multi_frame=5,
+        sampling_span=10,
+    ))
+
+val_dataloader_cfg = dict(
+    batch_size=1,
+    num_workers=data['workers_per_gpu'],
+    persistent_workers=True,
+    sampler=data['nonshuffler_sampler'],
+    dataset=dict(
+        type='NuscDataset',
+        data_root='./datasets/nuscenes',
+        ann_file='./datasets/nuscenes/nuscenes_map_infos_val.pkl',
+        meta=meta,
+        roi_size=roi_size,
+        cat2id=cat2id,
+        pipeline=test_pipeline,
+        eval_config=eval_config,
+        test_mode=True,
+        seq_split_num=1,
+    ))
+
+timestamp = (__import__('datetime')
+             .datetime
+             .now()
+             .strftime('%Y_%m_%d_%H_%M_%S'))
+
+evaluation = dict(
+    interval=num_epochs_interval*num_iters_per_epoch,
+    by_epoch = False,
+    jsonfile_prefix='val/${work_dir}/' + timestamp)
+
+custom_hooks = [
+    dict(
+        type='CustomDistEvalHook',
+        dataloader=val_dataloader_cfg,
+        priority='LOW',
+        **evaluation
+    )
+]
+
+# ---- Optimizer overrides (MMEngine-style) ----
+optim_wrapper = dict(
     paramwise_cfg=dict(
         custom_keys={
             'backbone.img_backbone': dict(lr_mult=0.1),
@@ -421,32 +477,44 @@ optimizer = dict(
             'backbone.positional_encoding': dict(lr_mult=0.5),
             'seg_decoder': dict(lr_mult=0.5),
         }),
-    weight_decay=1e-2)
-optimizer_config = dict(grad_clip=dict(max_norm=35, norm_type=2))
+    clip_grad=dict(max_norm=35, norm_type=2),
+)
 
-# learning policy & schedule
-lr_config = dict(
-    policy='CosineAnnealing',
-    warmup='linear',
-    warmup_iters=500,
-    warmup_ratio=1.0 / 3,
-    min_lr_ratio=3e-3)
+# learning rate schedulers (MMEngine style)
+param_scheduler = [
+    # Linear warm-up
+    dict(
+        type='LinearLR',
+        start_factor=1.0/3,
+        by_epoch=False,
+        begin=0,
+        end=500),
+    # Cosine annealing after warm-up
+    dict(
+        type='CosineAnnealingLR',
+        T_max=total_iters,
+        eta_min=5e-4 * 3e-3,
+        by_epoch=False,
+        begin=500,
+        end=total_iters)
+]
 
-evaluation = dict(interval=num_epochs_interval*num_iters_per_epoch)
 #evaluation = dict(interval=1) # for debugging use..
 find_unused_parameters = True #### when use checkpoint, find_unused_parameters must be False
-checkpoint_config = dict(interval=num_epochs_interval*num_iters_per_epoch)
 
-runner = dict(
-    type='MyRunnerWrapper', max_iters=num_epochs * num_iters_per_epoch)
+# default hooks overrides
+default_hooks = dict(
+    logger=dict(type='LoggerHook', interval=50),
+    checkpoint=dict(type='CheckpointHook', by_epoch=False, interval=num_epochs_interval*num_iters_per_epoch)
+)
 
-log_config = dict(
-    interval=50,
-    hooks=[
-        dict(type='TextLoggerHook'),
-        dict(type='TensorboardLoggerHook')
-    ])
+train_cfg=dict(
+    by_epoch=False, 
+    max_iters=num_epochs * num_iters_per_epoch
+)
+
+runner_type = 'MyRunnerWrapper' 
 
 SyncBN = True
 
-load_from = "work_dirs/maptracker_nusc_oldsplit_5frame_span10_stage2_warmup/latest.pth"
+load_from = "work_dirs/maptracker_nusc_oldsplit_5frame_span10_stage2_warmup/epoch_1.pth"

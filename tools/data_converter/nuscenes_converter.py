@@ -4,6 +4,8 @@ from os import path as osp
 from pyquaternion import Quaternion
 import argparse
 from nusc_split import TRAIN_SCENES, VAL_SCENES
+from mmengine.utils import track_iter_progress
+from mmengine.fileio import dump
 
 nus_categories = ('car', 'truck', 'trailer', 'bus', 'construction_vehicle',
                   'bicycle', 'motorcycle', 'pedestrian', 'traffic_cone',
@@ -66,6 +68,10 @@ def create_nuscenes_infos_map(root_path,
         train_scenes = TRAIN_SCENES
         val_scenes = VAL_SCENES
 
+    # Print out the list of scene names for training and validation sets
+    print('Train scenes:', train_scenes)
+    print('Val scenes:', val_scenes)
+
     test = 'test' in version
     if test:
         print('test scene: {}'.format(len(train_scenes)))
@@ -77,7 +83,7 @@ def create_nuscenes_infos_map(root_path,
     
     train_sample_idx = 0
     val_sample_idx = 0
-    for sample in mmcv.track_iter_progress(nusc.sample):
+    for sample in track_iter_progress(nusc.sample):
         lidar_token = sample['data']['LIDAR_TOP']
         sd_rec = nusc.get('sample_data', sample['data']['LIDAR_TOP'])
         cs_record = nusc.get('calibrated_sensor',
@@ -170,7 +176,7 @@ def create_nuscenes_infos_map(root_path,
     if test:
         info_path = osp.join(dest_path, f'{info_prefix}_map_infos_test.pkl')
         print(f'saving test set to {info_path}')
-        mmcv.dump(test_samples, info_path)
+        dump(test_samples, info_path)
 
     else:
         # for training set
@@ -179,7 +185,7 @@ def create_nuscenes_infos_map(root_path,
         else:
             info_path = osp.join(dest_path, f'{info_prefix}_map_infos_train.pkl')
         print(f'saving training set to {info_path}')
-        mmcv.dump(train_samples, info_path)
+        dump(train_samples, info_path)
 
         # for val set
         if new_split:
@@ -187,7 +193,7 @@ def create_nuscenes_infos_map(root_path,
         else:
             info_path = osp.join(dest_path, f'{info_prefix}_map_infos_val.pkl')
         print(f'saving validation set to {info_path}')
-        mmcv.dump(val_samples, info_path)
+        dump(val_samples, info_path)
 
 
 if __name__ == '__main__':

@@ -14,21 +14,17 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from mmcv.cnn import xavier_init, constant_init
-from mmcv.cnn.bricks.registry import (ATTENTION,
-                                      TRANSFORMER_LAYER_SEQUENCE)
-from mmcv.cnn.bricks.transformer import TransformerLayerSequence
+from mmengine.model import BaseModule, constant_init, xavier_init
+from mmengine.registry import MODELS
+from mmengine.utils import to_2tuple
 import math
-from mmcv.runner.base_module import BaseModule, ModuleList, Sequential
-from mmcv.utils import (ConfigDict, build_from_cfg, deprecated_api_warning,
-                        to_2tuple)
 
 from mmcv.utils import ext_loader
 from mmcv.ops.multi_scale_deform_attn import (MultiScaleDeformableAttnFunction,
                                               multi_scale_deformable_attn_pytorch)
 from .fp16_dattn import MultiScaleDeformableAttnFunctionFp32
 
-@ATTENTION.register_module()
+@MODELS.register_module()
 class CustomMSDeformableAttention(BaseModule):
     """An attention module used in Deformable-Detr.
 
@@ -129,8 +125,6 @@ class CustomMSDeformableAttention(BaseModule):
         xavier_init(self.output_proj, distribution='uniform', bias=0.)
         self._is_init = True
 
-    @deprecated_api_warning({'residual': 'identity'},
-                            cls_name='MultiScaleDeformableAttention')
     def forward(self,
                 query,
                 key=None,

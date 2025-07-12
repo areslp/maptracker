@@ -1,6 +1,6 @@
 from .base_dataset import BaseMapDataset
 from .map_utils.av2map_extractor import AV2MapExtractor
-from mmdet.datasets import DATASETS
+from mmdet.registry import DATASETS
 import numpy as np
 from .visualize.renderer import Renderer
 from time import time

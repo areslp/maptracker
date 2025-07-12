@@ -11,7 +11,7 @@ import copy
 import torch.distributed as dist
 import numpy as np
 import torch
-from mmcv.runner import get_dist_info
+from mmengine.dist import get_dist_info
 from torch.utils.data import Sampler
 from .sampler import SAMPLER
 import random

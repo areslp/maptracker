@@ -1,13 +1,11 @@
 from abc import ABCMeta, abstractmethod
 
 import torch.nn as nn
-from mmcv.runner import auto_fp16
-from mmcv.utils import print_log
+from mmengine.logging import MMLogger
 
-from mmdet.utils import get_root_logger
-from mmdet3d.models.builder import DETECTORS
+from mmdet.registry import MODELS
 
-MAPPERS = DETECTORS
+MAPPERS = MODELS
 
 class BaseMapper(nn.Module, metaclass=ABCMeta):
     """Base class for mappers."""
@@ -65,8 +63,8 @@ class BaseMapper(nn.Module, metaclass=ABCMeta):
                 Defaults to None.
         """
         if pretrained is not None:
-            logger = get_root_logger()
-            print_log(f'load model from: {pretrained}', logger=logger)
+            logger = MMLogger.get_current_instance()
+            logger.info(f'load model from: {pretrained}')
 
     def forward_test(self, *args, **kwargs):
         """
@@ -77,7 +75,6 @@ class BaseMapper(nn.Module, metaclass=ABCMeta):
         else:
             self.aug_test()
 
-    # @auto_fp16(apply_to=('img', ))
     def forward(self, *args, return_loss=True, **kwargs):
         """Calls either :func:`forward_train` or :func:`forward_test` depending
         on whether ``return_loss`` is ``True``.

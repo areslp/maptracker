@@ -1,12 +1,13 @@
 import numpy as np
-from mmcv.parallel import DataContainer as DC
+from legacy.data_container import DataContainer as DC
 
-from mmdet3d.core.points import BasePoints
-from mmdet.datasets.builder import PIPELINES
-from mmdet.datasets.pipelines import to_tensor
+from mmdet3d.structures.points import BasePoints
+from mmdet.registry import TRANSFORMS
+from mmcv.transforms.formatting import to_tensor
+from mmcv.transforms import BaseTransform
 
-@PIPELINES.register_module()
-class FormatBundleMap(object):
+@TRANSFORMS.register_module()
+class FormatBundleMap(BaseTransform):
     """Format data for map tasks and then collect data for model input.
 
     These fields are formatted as follows.
@@ -20,12 +21,12 @@ class FormatBundleMap(object):
     def __init__(self, process_img=True, 
                 keys=['img', 'semantic_mask', 'vectors'], 
                 meta_keys=['intrinsics', 'extrinsics']):
-        
+        super().__init__()
         self.process_img = process_img
         self.keys = keys
         self.meta_keys = meta_keys
 
-    def __call__(self, results):
+    def transform(self, results):
         """Call function to transform and format common fields in results.
 
         Args:

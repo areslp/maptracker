@@ -1,9 +1,17 @@
-import sys
-import os
+# Ensure project root is on PYTHONPATH so that 'plugin' (compat shims) is available.
+import os, sys
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-sys.path.append(os.path.dirname(SCRIPT_DIR))
+# Add ../.. (project root) and .. (tools) to sys.path for imports.
+_TOOLS_DIR = os.path.dirname(SCRIPT_DIR)
+_ROOT_DIR = os.path.dirname(_TOOLS_DIR)
+for _p in (_ROOT_DIR, _TOOLS_DIR):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
 
-import argparse     
+# Activate compatibility layer
+import plugin  # noqa: F401 – side-effect import
+
+import argparse
 import mmcv
 from mmcv import Config
 import matplotlib.transforms as transforms
@@ -1148,13 +1156,19 @@ def save_as_video(image_list, mp4_output_path, scale=None):
 
 
 def vis_pred_data(scene_name="", pred_results=None, origin=None, roi_size=None, args=None):
-    
+    print(f"len of pred_results: {len(pred_results)}")
+
+    scene_names = {item['scene_name'] for item in pred_results}
+    print('All scenes in pred_results:', sorted(scene_names))
 
     # get the item index of the scene
     index_list = []
     for index in range(len(pred_results)):
         if pred_results[index]["scene_name"] == scene_name:
             index_list.append(index)
+
+    # DEBUG: print scene index information to help diagnose empty index_list issues
+    print(f"[DEBUG] scene_name={scene_name}, index_list_len={len(index_list)}, index_list={index_list}")
     
     car_trajectory = []
     id_prev2curr_pred_vectors = defaultdict(list)

@@ -147,7 +147,8 @@ class VectorInstanceMemory(nn.Module):
         self.instance2mem[batch_i] = track2mem_info
         self.num_ins[batch_i] = num_instances
         self.mem_entry_lengths[batch_i][mem_instance_ids] += 1
-        self.active_mem_ids[batch_i] = mem_instance_ids.long().to(propagated_ids.device)
+        # keep indices on CPU to match `mem_entry_lengths` tensor (stored on CPU)
+        self.active_mem_ids[batch_i] = mem_instance_ids.long().cpu()
         active_mem_entry_lens = self.mem_entry_lengths[batch_i][self.active_mem_ids[batch_i]]
         self.valid_track_idx[batch_i] = torch.where(active_mem_entry_lens >= 1)[0]
 
@@ -233,7 +234,7 @@ class VectorInstanceMemory(nn.Module):
         # prepare relative seq idx gap
         relative_seq_idx = torch.zeros_like(mem_embeds[:,:,0]).long()
         relative_seq_idx[:valid_mem_len] = seq_id - mem_seq_ids[:valid_mem_len]
-        relative_seq_pe = self.cached_pe[relative_seq_idx].to(mem_embeds.device)
+        relative_seq_pe = self.cached_pe.to(mem_embeds.device)[relative_seq_idx]
 
         # prepare relative pose information for each active instance
         curr2prev_matrix, prev2curr_matrix = self.prepare_transformation_batch(mem_trans[:valid_bank_size],

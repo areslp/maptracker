@@ -1,9 +1,10 @@
 import mmcv
 import numpy as np
-from mmdet.datasets.builder import PIPELINES
+from mmcv.transforms import BaseTransform
+from mmdet.registry import TRANSFORMS
 
-@PIPELINES.register_module(force=True)
-class LoadMultiViewImagesFromFiles(object):
+@TRANSFORMS.register_module(force=True)
+class LoadMultiViewImagesFromFiles(BaseTransform):
     """Load multi channel images from a list of separate channel files.
 
     Expects results['img_filename'] to be a list of filenames.
@@ -15,10 +16,11 @@ class LoadMultiViewImagesFromFiles(object):
     """
 
     def __init__(self, to_float32=False, color_type='unchanged'):
+        super().__init__()
         self.to_float32 = to_float32
         self.color_type = color_type
 
-    def __call__(self, results):
+    def transform(self, results):
         """Call function to load multi-view image from files.
 
         Args:

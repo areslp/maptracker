@@ -13,14 +13,15 @@ import mmcv
 import torch
 import torch.distributed as dist
 from mmcv.image import tensor2imgs
-from mmcv.runner import get_dist_info
-
-from mmdet.core import encode_mask_results
-
+from mmengine.dist import get_dist_info
+from mmengine.fileio import dump
 
 import mmcv
 import numpy as np
 import pycocotools.mask as mask_util
+
+from mmcv.parallel import scatter as _legacy_scatter
+from mmengine.utils import mkdir_or_exist
 
 def custom_encode_mask_results(mask_results):
     """Encode bitmap mask to RLE code. Semantic Masks only
@@ -69,6 +70,24 @@ def custom_multi_gpu_test(model, data_loader, tmpdir=None, gpu_collect=False):
     have_mask = False
     for i, data in enumerate(data_loader):
         with torch.no_grad():
+
+            # Scatter DataContainer to current GPU
+            _cur_dev = torch.device(f"cuda:{torch.cuda.current_device()}")
+            data = _legacy_scatter(data, [_cur_dev])[0]
+
+            # Debug: print the structure of the first batch on rank0
+            if i == 0 and rank == 0:
+                print("[DEBUG] Batch 0 data overview:")
+                for k, v in data.items():
+                    if hasattr(v, 'shape'):
+                        print(f"   {k}: {type(v).__name__}, shape={tuple(v.shape)}")
+                    elif isinstance(v, (list, tuple)):
+                        print(f"   {k}: {type(v).__name__}, len={len(v)}")
+                    elif isinstance(v, dict):
+                        print(f"   {k}: dict, keys={list(v.keys())}")
+                    else:
+                        print(f"   {k}: {type(v).__name__}")
+
             result = model(return_loss=False, rescale=True, **data)
             # encode mask results
             if isinstance(result, dict):
@@ -120,7 +139,7 @@ def collect_results_cpu(result_part, size, tmpdir=None):
                                 dtype=torch.uint8,
                                 device='cuda')
         if rank == 0:
-            mmcv.mkdir_or_exist('.dist_test')
+            mkdir_or_exist('.dist_test')
             tmpdir = tempfile.mkdtemp(dir='.dist_test')
             tmpdir = torch.tensor(
                 bytearray(tmpdir.encode()), dtype=torch.uint8, device='cuda')
@@ -128,9 +147,9 @@ def collect_results_cpu(result_part, size, tmpdir=None):
         dist.broadcast(dir_tensor, 0)
         tmpdir = dir_tensor.cpu().numpy().tobytes().decode().rstrip()
     else:
-        mmcv.mkdir_or_exist(tmpdir)
+        mkdir_or_exist(tmpdir)
     # dump the part result to the dir
-    mmcv.dump(result_part, osp.join(tmpdir, f'part_{rank}.pkl'))
+    dump(result_part, osp.join(tmpdir, f'part_{rank}.pkl'))
     dist.barrier()
     # collect all parts
     if rank != 0:
@@ -158,4 +177,4 @@ def collect_results_cpu(result_part, size, tmpdir=None):
 
 
 def collect_results_gpu(result_part, size):
-    collect_results_cpu(result_part, size)
+    return collect_results_cpu(result_part, size)

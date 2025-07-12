@@ -4,28 +4,18 @@ import warnings
 
 import torch
 import torch.nn as nn
-from mmcv.cnn import build_activation_layer, build_norm_layer, xavier_init
-from mmcv.cnn.bricks.registry import (TRANSFORMER_LAYER,
-                                      TRANSFORMER_LAYER_SEQUENCE)
-from mmcv.cnn.bricks.transformer import (BaseTransformerLayer,
-                                         TransformerLayerSequence,
-                                         build_transformer_layer_sequence)
-from mmcv.runner.base_module import BaseModule
+from mmcv.cnn import build_activation_layer, build_norm_layer
+from mmengine.model import xavier_init
+from mmengine.model import BaseModule  # Keep for other potential uses
 from torch.nn.init import normal_
 
-from mmdet.models.utils.builder import TRANSFORMER
+from mmdet.registry import MODELS
+from mmcv.cnn.bricks.transformer import TransformerLayerSequence
 
-from mmdet.models.utils.transformer import Transformer
-
-try:
-    from mmcv.ops.multi_scale_deform_attn import MultiScaleDeformableAttention
-except ImportError:
-    warnings.warn(
-        '`MultiScaleDeformableAttention` in MMCV has been moved to '
-        '`mmcv.ops.multi_scale_deform_attn`, please update your MMCV')
-    from mmcv.cnn.bricks.transformer import MultiScaleDeformableAttention
+from mmcv.ops.multi_scale_deform_attn import MultiScaleDeformableAttention
 
 from .fp16_dattn import MultiScaleDeformableAttentionFp16
+from legacy.transformer import Transformer as _LegacyTransformer
 
 def inverse_sigmoid(x, eps=1e-5):
     """Inverse function of sigmoid.
@@ -44,7 +34,7 @@ def inverse_sigmoid(x, eps=1e-5):
     x2 = (1 - x).clamp(min=eps)
     return torch.log(x1 / x2)
 
-@TRANSFORMER_LAYER_SEQUENCE.register_module()
+@MODELS.register_module()
 class DeformableDetrTransformerDecoder_(TransformerLayerSequence):
     """Implements the decoder in DETR transformer.
     Args:
@@ -126,8 +116,8 @@ class DeformableDetrTransformerDecoder_(TransformerLayerSequence):
         return output, reference_points
 
 
-@TRANSFORMER.register_module()
-class DeformableDetrTransformer_(Transformer):
+@MODELS.register_module()
+class DeformableDetrTransformer_(_LegacyTransformer):
     """Implements the DeformableDETR transformer.
     Args:
         as_two_stage (bool): Generate query from encoder features.

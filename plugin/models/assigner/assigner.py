@@ -1,14 +1,14 @@
 import torch
 
-from mmdet.core.bbox.builder import BBOX_ASSIGNERS
-from mmdet.core.bbox.assigners import AssignResult
-from mmdet.core.bbox.assigners import BaseAssigner
-from mmdet.core.bbox.match_costs import build_match_cost
+from mmdet.registry import TASK_UTILS
+from mmdet.models.task_modules.assigners import AssignResult
+from mmdet.models.task_modules.assigners import BaseAssigner
+from mmdet.models.task_modules import build_match_cost
 from scipy.optimize import linear_sum_assignment
 
 import numpy as np
 
-@BBOX_ASSIGNERS.register_module()
+@TASK_UTILS.register_module()
 class HungarianLinesAssigner(BaseAssigner):
     """
         Computes one-to-one matching between predictions and ground truth.

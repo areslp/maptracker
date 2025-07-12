@@ -1,4 +1,3 @@
-
 # ---------------------------------------------
 # Copyright (c) OpenMMLab. All rights reserved.
 # ---------------------------------------------
@@ -10,15 +9,11 @@ import warnings
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from mmcv.cnn import xavier_init, constant_init
-from mmcv.cnn.bricks.registry import (ATTENTION,
-                                      TRANSFORMER_LAYER,
-                                      TRANSFORMER_LAYER_SEQUENCE)
-from mmcv.cnn.bricks.transformer import build_attention
+from mmengine.model import xavier_init, constant_init
+from mmengine.registry import MODELS
 import math
-from mmcv.runner import force_fp32, auto_fp16
 
-from mmcv.runner.base_module import BaseModule, ModuleList, Sequential
+from mmengine.model import BaseModule, ModuleList, Sequential
 
 from mmcv.utils import ext_loader
 from .multi_scale_deformable_attn_function import MultiScaleDeformableAttnFunction_fp32, \
@@ -27,7 +22,7 @@ ext_module = ext_loader.load_ext(
     '_ext', ['ms_deform_attn_backward', 'ms_deform_attn_forward'])
 
 
-@ATTENTION.register_module()
+@MODELS.register_module()
 class SpatialCrossAttention(BaseModule):
     """An attention module used in BEVFormer.
     Args:
@@ -60,7 +55,7 @@ class SpatialCrossAttention(BaseModule):
         self.dropout = nn.Dropout(dropout)
         self.pc_range = pc_range
         self.fp16_enabled = False
-        self.deformable_attention = build_attention(deformable_attention)
+        self.deformable_attention = MODELS.build(deformable_attention)
         self.embed_dims = embed_dims
         self.num_cams = num_cams
         self.output_proj = nn.Linear(embed_dims, embed_dims)
@@ -71,7 +66,6 @@ class SpatialCrossAttention(BaseModule):
         """Default initialization for Parameters of Module."""
         xavier_init(self.output_proj, distribution='uniform', bias=0.)
     
-    @force_fp32(apply_to=('query', 'key', 'value', 'query_pos', 'reference_points_cam'))
     def forward(self,
                 query,
                 key,
@@ -174,7 +168,7 @@ class SpatialCrossAttention(BaseModule):
         return self.dropout(slots) + inp_residual
 
 
-@ATTENTION.register_module()
+@MODELS.register_module()
 class MSDeformableAttention3D(BaseModule):
     """An attention module used in BEVFormer based on Deformable-Detr.
     `Deformable DETR: Deformable Transformers for End-to-End Object Detection.
@@ -398,8 +392,7 @@ class MSDeformableAttention3D(BaseModule):
         return output
 
 
-
-@ATTENTION.register_module()
+@MODELS.register_module()
 class MSIPM3D(BaseModule):
     """An attention module used in BEVFormer based on Deformable-Detr.
     `Deformable DETR: Deformable Transformers for End-to-End Object Detection.

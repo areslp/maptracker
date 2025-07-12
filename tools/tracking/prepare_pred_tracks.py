@@ -1,4 +1,14 @@
 import argparse
+# Dynamically add project root to PYTHONPATH so that 'plugin' can be imported
+# regardless of the current working directory.
+import os, sys
+_ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+if _ROOT_DIR not in sys.path:
+    sys.path.insert(0, _ROOT_DIR)
+
+# Activate compatibility shims (mmcv.Config etc.)
+import plugin  # noqa: F401 – side-effect import
+
 import mmcv
 from mmcv import Config
 import os

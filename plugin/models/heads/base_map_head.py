@@ -2,7 +2,7 @@ from abc import ABCMeta, abstractmethod
 
 import torch.nn as nn
 from mmcv.runner import auto_fp16
-from mmcv.utils import print_log
+from mmengine.logging import print_log
 
 from mmdet.utils import get_root_logger
 

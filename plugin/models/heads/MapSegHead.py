@@ -3,17 +3,14 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from mmcv.cnn import Conv2d, Linear, build_activation_layer, bias_init_with_prob, xavier_init
-from mmcv.runner import force_fp32
-from mmcv.cnn.bricks.transformer import build_positional_encoding
-from mmdet.models import build_loss
-
-from mmdet.models import HEADS
+from mmcv.cnn import Conv2d, Linear
+from mmengine.model import bias_init_with_prob
+from mmdet.registry import MODELS
 
 from einops import repeat
 
 
-@HEADS.register_module(force=True)
+@MODELS.register_module(force=True)
 class MapSegHead(nn.Module):
 
     def __init__(self, 
@@ -32,8 +29,8 @@ class MapSegHead(nn.Module):
         self.bev_size = bev_size
         self.canvas_size = canvas_size
 
-        self.loss_seg = build_loss(loss_seg)
-        self.loss_dice = build_loss(loss_dice)
+        self.loss_seg = MODELS.build(loss_seg)
+        self.loss_dice = MODELS.build(loss_dice)
 
         if self.loss_seg.use_sigmoid:
             self.cls_out_channels = num_classes

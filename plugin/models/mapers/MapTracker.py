@@ -5,12 +5,12 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from mmdet3d.models.builder import (build_backbone, build_head)
-
+from mmdet.registry import MODELS
+from mmengine.runner import load_checkpoint
 from .base_mapper import BaseMapper, MAPPERS
 from ..utils.query_update import MotionMLP
 from copy import deepcopy
-from mmdet.core import multi_apply
+from mmdet.models.utils import multi_apply
 
 from einops import rearrange, repeat
 from scipy.spatial.transform import Rotation as R
@@ -18,7 +18,7 @@ from scipy.spatial.transform import Rotation as R
 from .vector_memory import VectorInstanceMemory
 
 
-@MAPPERS.register_module()
+@MODELS.register_module()
 class MapTracker(BaseMapper):
 
     def __init__(self,
@@ -48,14 +48,14 @@ class MapTracker(BaseMapper):
         self.model_name = model_name
         self.last_epoch = None
   
-        self.backbone = build_backbone(backbone_cfg)
+        self.backbone = MODELS.build(backbone_cfg)
 
         if neck_cfg is not None:
-            self.neck = build_head(neck_cfg)
+            self.neck = MODELS.build(neck_cfg)
         else:
             self.neck = nn.Identity()
         
-        self.head = build_head(head_cfg)
+        self.head = MODELS.build(head_cfg)
         self.num_decoder_layers = self.head.transformer.decoder.num_layers
         self.skip_vector_head = skip_vector_head
         self.freeze_bev = freeze_bev # whether freeze bev related parameters
@@ -69,7 +69,7 @@ class MapTracker(BaseMapper):
         self.query_propagate = MotionMLP(c_dim=c_dim, f_dim=self.head.embed_dims, identity=True)
 
         # BEV semantic seg head
-        self.seg_decoder = build_head(seg_cfg)
+        self.seg_decoder = MODELS.build(seg_cfg)
         
         # BEV 
         self.bev_h = bev_h
@@ -113,7 +113,6 @@ class MapTracker(BaseMapper):
         if pretrained:
             import logging
             logger = logging.getLogger()
-            from mmcv.runner import load_checkpoint
             load_checkpoint(self, pretrained, strict=False, logger=logger)
         else:
             try:
@@ -855,7 +854,7 @@ class MapTracker(BaseMapper):
             else:
                 fp_select_mask = neg_score_mask
 
-            false_out_ind = not_prev_out_ind[fp_select_mask]
+            false_out_ind = not_prev_out_ind.to(fp_select_mask.device)[fp_select_mask]
 
             prev_out_ind_final = torch.tensor(prev_out_ind_filtered.tolist() + false_out_ind.tolist()).long()
             target_ind_matching = torch.cat([
@@ -887,7 +886,7 @@ class MapTracker(BaseMapper):
             prev_gt_labels = prev_gt_list['labels'][b_i] 
             target['track_query_gt_lines'] = prev_gt_lines[prev_out_ind_final]
             target['track_query_gt_labels'] = prev_gt_labels[prev_out_ind_final]
-
+ 
             target['track_queries_mask'] = torch.cat([
                 track_queries_mask,
                 torch.tensor([False, ] * self.head.num_queries).to(device)
@@ -899,9 +898,9 @@ class MapTracker(BaseMapper):
             ]).bool()
 
             if use_memory:
-                is_first_frame = (timestep == 0)
-                num_tracks = 0 if timestep == 0 else self.tracked_query_length[b_i]
-                self.memory_bank.update_memory(b_i, is_first_frame, prev_out_ind_final, prev_out, num_tracks, scene_seq_id, timestep)
+                 is_first_frame = (timestep == 0)
+                 num_tracks = 0 if timestep == 0 else self.tracked_query_length[b_i]
+                 self.memory_bank.update_memory(b_i, is_first_frame, prev_out_ind_final, prev_out, num_tracks, scene_seq_id, timestep)
         
         targets = self._batchify_tracks(targets)
         return targets

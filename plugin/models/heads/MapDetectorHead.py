@@ -2,19 +2,17 @@ import copy
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from mmcv.cnn import Conv2d, Linear, build_activation_layer, bias_init_with_prob, xavier_init
-from mmcv.runner import force_fp32
-from mmcv.cnn.bricks.transformer import build_positional_encoding
-from mmdet.models.utils import build_transformer
-from mmdet.models import build_loss
+from mmcv.cnn import Conv2d, Linear
+from mmengine.model import bias_init_with_prob, xavier_init
+from mmdet.registry import MODELS, TASK_UTILS
+from mmdet.models.layers import inverse_sigmoid
 
-from mmdet.core import multi_apply, reduce_mean, build_assigner, build_sampler
-from mmdet.models import HEADS
-from mmdet.models.utils.transformer import inverse_sigmoid
-
+from mmdet.models.utils import multi_apply
+from mmdet.utils import reduce_mean
 from einops import rearrange
+from mmengine.structures import InstanceData
 
-@HEADS.register_module(force=True)
+@MODELS.register_module(force=True)
 class MapDetectorHead(nn.Module):
 
     def __init__(self, 
@@ -60,13 +58,13 @@ class MapDetectorHead(nn.Module):
         self.register_buffer('origin', torch.tensor(origin, dtype=torch.float32))
 
         sampler_cfg = dict(type='PseudoSampler')
-        self.sampler = build_sampler(sampler_cfg, context=self)
+        self.sampler = TASK_UTILS.build(sampler_cfg)
 
-        self.transformer = build_transformer(transformer)
+        self.transformer = MODELS.build(transformer)
 
-        self.loss_cls = build_loss(loss_cls)
-        self.loss_reg = build_loss(loss_reg)
-        self.assigner = build_assigner(assigner)
+        self.loss_cls = MODELS.build(loss_cls)
+        self.loss_reg = MODELS.build(loss_reg)
+        self.assigner = TASK_UTILS.build(assigner)
 
         if self.loss_cls.use_sigmoid:
             self.cls_out_channels = num_classes
@@ -118,7 +116,7 @@ class MapDetectorHead(nn.Module):
             num_feats=self.embed_dims//2,
             normalize=True
         )
-        self.bev_pos_embed = build_positional_encoding(positional_encoding)
+        self.bev_pos_embed = MODELS.build(positional_encoding)
 
         # query_pos_embed & query_embed
         self.query_embedding = nn.Embedding(self.num_queries,
@@ -355,7 +353,6 @@ class MapDetectorHead(nn.Module):
 
         return outputs
 
-    @force_fp32(apply_to=('score_pred', 'lines_pred', 'gt_lines'))
     def _get_target_single(self,
                            score_pred,
                            lines_pred,
@@ -399,8 +396,11 @@ class MapDetectorHead(nn.Module):
                                                       labels=gt_labels, ),
                                              track_info=track_info,
                                              gt_bboxes_ignore=gt_bboxes_ignore)
+        
+        pred_instances = InstanceData(priors=lines_pred)
+        gt_instances = InstanceData(bboxes=gt_lines, labels=gt_labels)
         sampling_result = self.sampler.sample(
-            assign_result, lines_pred, gt_lines)
+            assign_result, pred_instances, gt_instances)
         num_gt = len(gt_lines)
         pos_inds = sampling_result.pos_inds
         neg_inds = sampling_result.neg_inds
@@ -439,7 +439,6 @@ class MapDetectorHead(nn.Module):
         return (labels, label_weights, lines_target, lines_weights,
                 pos_inds, neg_inds, pos_gt_inds, matched_reg_cost)
 
-    # @force_fp32(apply_to=('preds', 'gts'))
     def get_targets(self, preds, gts, track_info=None, gt_bboxes_ignore_list=None):
         """
             Compute regression and classification targets for a batch image.
@@ -503,7 +502,6 @@ class MapDetectorHead(nn.Module):
 
         return new_gts, num_total_pos, num_total_neg, pos_inds_list, pos_gt_inds_list, matched_reg_cost
 
-    # @force_fp32(apply_to=('preds', 'gts'))
     def loss_single(self,
                     preds,
                     gts,
@@ -589,7 +587,6 @@ class MapDetectorHead(nn.Module):
 
         return loss_dict, pos_inds_list, pos_gt_inds_list, matched_reg_cost, new_gts_info
     
-    @force_fp32(apply_to=('gt_lines_list', 'preds_dicts'))
     def loss(self,
              gts,
              preds,
@@ -650,7 +647,9 @@ class MapDetectorHead(nn.Module):
         for i in range(bs):
             tmp_vectors = lines[i]
             # set up the prop_flags
-            tmp_prop_flags = torch.zeros(tmp_vectors.shape[0]).bool()
+            tmp_prop_flags = torch.zeros(
+                tmp_vectors.shape[0], dtype=torch.bool, device=tmp_vectors.device
+            )
             tmp_prop_flags[-100:] = 0
             tmp_prop_flags[:-100] = 1
             num_preds, num_points2 = tmp_vectors.shape
@@ -735,15 +734,23 @@ class MapDetectorHead(nn.Module):
         pos_scores = tmp_scores[pos]
 
         if first_frame:
-            global_ids = torch.arange(len(pos_vectors))
+            # Initialize global IDs on the same device as the vectors for consistency
+            global_ids = torch.arange(len(pos_vectors), device=pos_vectors.device)
             num_instance = len(pos_vectors)
         else:
-            prop_ids = self.prop_info['global_ids']
+            # Ensure the stored global IDs are on the same device as the current tensors
+            prop_ids = self.prop_info['global_ids'].to(pos_track.device)
             prop_num_instance = self.prop_info['num_instance']
+
+            # Track queries that are kept in the current frame
             global_ids_track = prop_ids[pos_track]
+
+            # Newborn detections get new global IDs, created on the same device for consistency
             num_newborn = int(pos_det.sum())
-            global_ids_newborn = torch.arange(num_newborn) + prop_num_instance
-            global_ids = torch.cat([global_ids_track, global_ids_newborn])
+            global_ids_newborn = torch.arange(num_newborn, device=prop_ids.device) + prop_num_instance
+
+            # Concatenate to form the updated global ID list
+            global_ids = torch.cat([global_ids_track, global_ids_newborn], dim=0)
             num_instance = prop_num_instance + num_newborn
             
         self.prop_info = {

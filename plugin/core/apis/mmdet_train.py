@@ -3,22 +3,23 @@
 # ---------------------------------------------
 #  Modified by Zhiqi Li
 # ---------------------------------------------
-# ---------------------------------------------
 #  Modified by Shihao Wang
 # ---------------------------------------------
 import random
 import warnings
+import pprint
+
 
 import numpy as np
 import torch
 import torch.distributed as dist
-from mmcv.parallel import MMDataParallel, MMDistributedDataParallel
-from mmcv.runner import (HOOKS, DistSamplerSeedHook, EpochBasedRunner, IterBasedRunner, RUNNERS,
-                         Fp16OptimizerHook, OptimizerHook, build_optimizer,
-                         build_runner, get_dist_info)
-from mmcv.utils import build_from_cfg
-
-from mmdet.core import EvalHook
+from mmengine.model.wrappers import MMDistributedDataParallel
+from torch.nn import DataParallel as MMDataParallel
+from legacy.scatter_gather import scatter as _legacy_scatter
+from mmcv.runner import (HOOKS, IterBasedRunner)
+from mmengine.dist import get_dist_info
+from mmengine.registry import RUNNERS
+from mmengine.registry import build_from_cfg
 
 from mmdet.datasets import (build_dataset,
                             replace_ImageToTensor)
@@ -31,24 +32,236 @@ from ..evaluation.eval_hooks import CustomDistEvalHook
 
 @RUNNERS.register_module()
 class MyRunnerWrapper(IterBasedRunner):
+
+    def __init__(self, *args, **kwargs):
+        """Initialize MyRunnerWrapper with necessary attributes for hooks."""
+        super().__init__(*args, **kwargs)
+        
+        # Ensure work_dir is properly set for CheckpointHook
+        if not hasattr(self, 'work_dir') or self.work_dir is None:
+            self.work_dir = kwargs.get('work_dir', './work_dir')
+        
+        # Ensure other attributes that CheckpointHook might need
+        if not hasattr(self, 'logger'):
+            self.logger = kwargs.get('logger', None)
+            
+        # Initialize log_buffer if it doesn't exist (needed for evaluation hooks)
+        if not hasattr(self, 'log_buffer'):
+            # Create a simple log buffer with an output dict (needed by eval hooks)
+            # 使用 legacy 目录中的完整 LogBuffer 实现
+            from legacy.log_buffer import LogBuffer
+            self.log_buffer = LogBuffer()
+            
+        # Initialize rank attribute for distributed training
+        if not hasattr(self, 'rank'):
+            try:
+                import torch.distributed as dist
+                self.rank = dist.get_rank() if dist.is_initialized() else 0
+            except:
+                self.rank = 0
+
+    @property
+    def iter(self):
+        """Expose current iteration count for hooks."""
+        return getattr(self, '_iter', 0)
+    
+    @property
+    def epoch(self):
+        """Expose current epoch count for hooks."""
+        return getattr(self, '_epoch', 0)
+    
     def train(self, data_loader, **kwargs):
-        self.model.module.num_iter = self._iter
+        """One training iteration.
+
+        Handles DataLoader iteration safely, keeps track of epoch/iter counters
+        and calls the necessary hooks expected by MMCV/MMEngine. Validation is
+        triggered by EvalHook that listens to ``after_train_iter``.
+        """
+
+        # Lazily create an iterator over the dataloader and reuse it until
+        # exhausted.
+        if not hasattr(self, '_data_iter'):
+            self._data_iter = iter(data_loader)
+
+        try:
+            data_batch = next(self._data_iter)
+        except StopIteration:
+            # ------------------ End of epoch ------------------
+            # Call hooks signalling the end of current epoch
+            self.call_hook('after_train_epoch')
+
+            # Update epoch counter
+            if not hasattr(self, '_epoch'):
+                self._epoch = 0  # type: ignore
+            self._epoch += 1  # type: ignore
+
+            # Inform sampler (for distributed shuffling)
+            if hasattr(data_loader, 'sampler') and hasattr(data_loader.sampler, 'set_epoch'):
+                data_loader.sampler.set_epoch(self._epoch)
+
+            # Reset iterator & inner-epoch counter
+            self._inner_iter = 0  # reset inner-epoch iteration counter
+            self._data_iter = iter(data_loader)
+
+            # Call hooks signalling the beginning of new epoch
+            self.call_hook('before_train_epoch')
+
+            data_batch = next(self._data_iter)
+
+        # Ensure counters exist
+        if not hasattr(self, '_iter'):
+            self._iter = 0  # type: ignore
+        if not hasattr(self, '_inner_iter'):
+            self._inner_iter = 0  # type: ignore
+
+        # --------------------------------------------------------------
+        # Unwrap Distributed/DataParallel so that both single-GPU (raw
+        # model) and multi-GPU (model.module) cases are supported.
+        # --------------------------------------------------------------
+        inner_model = self.model.module if hasattr(self.model, 'module') else self.model
+
+        # Expose counters for the model (custom logic)
+        inner_model.num_iter = self._iter
+        inner_model.num_epoch = getattr(self, '_epoch', 0)
+
         self.model.train()
         self.mode = 'train'
         self.data_loader = data_loader
-        self._epoch = data_loader.epoch
-        self.model.module.num_epoch = self._epoch
-        data_batch = next(data_loader)
-        self.call_hook('before_train_iter')
-        outputs = self.model.train_step(data_batch, self.optimizer, **kwargs)
+
+        # Unwrap DataContainer & move tensors to current GPU
+        _cur_dev = torch.device(f"cuda:{torch.cuda.current_device()}")
+        data_batch = _legacy_scatter(data_batch, [_cur_dev])[0]
+        print(f"data_batch type: {type(data_batch)}")
+
+        if self._iter == 0 and self.rank == 0:  # 只在第一迭代、rank0 打印
+            for k, v in data_batch.items():
+                if isinstance(v, (list, tuple)):
+                    print(f"{k}: {type(v)} len={len(v)} -> inner type {type(v[0])}")
+                else:
+                    print(f"{k}: {type(v)}")
+
+        # ------------------------------------------------------------------
+        # MMEngine DistributedModelWrapper expects ``model.module`` to have a
+        # ``data_preprocessor`` attr.  Legacy MMDet v2 models do not define
+        # this.  Provide a no-op implementation on-the-fly for compatibility.
+        # ------------------------------------------------------------------
+        if not hasattr(inner_model, 'data_preprocessor'):
+            class _NoopDataPreprocessor(torch.nn.Module):
+                def forward(self, data, training=False):  # type: ignore
+                    return data
+
+            inner_model.data_preprocessor = _NoopDataPreprocessor().to(_cur_dev)  # type: ignore
+
+        # ------------------------------------------------------------------
+        # Legacy MMDet v2 models output a dict of losses but do not implement
+        # ``parse_losses`` expected by MMEngine wrappers.  Provide a fallback
+        # implementation that mimics the old behaviour.
+        # ------------------------------------------------------------------
+        if not hasattr(inner_model, 'parse_losses'):
+            import types
+
+            def _default_parse_losses(self, losses):  # type: ignore
+                """Parse the raw outputs (loss dict) and compute total loss & log_vars."""
+                # Case 1: Model already returns (loss, log_vars, *rest)
+                if isinstance(losses, tuple):
+                    assert len(losses) >= 2, 'Expect (loss, log_vars, ...)'
+                    total_loss, log_vars = losses[0], losses[1]
+                    if isinstance(total_loss, torch.Tensor):
+                        total_loss = total_loss.mean()
+                    elif isinstance(total_loss, (int, float)):
+                        total_loss = torch.tensor(total_loss, device=next(self.parameters()).device)  # type: ignore
+
+                    # Ensure log_vars are python scalars for logging
+                    log_vars = {k: (v.mean().item() if isinstance(v, torch.Tensor) else float(v)) for k, v in log_vars.items()}
+                    return total_loss, log_vars
+
+                # Case 2: losses is a dict as in MMDet v3 style
+                if isinstance(losses, dict):
+                    log_vars = {}
+                    total_loss = 0.0
+                    for name, value in losses.items():
+                        if isinstance(value, torch.Tensor):
+                            loss_value = value.mean()
+                        elif isinstance(value, list):
+                            loss_value = sum(v.mean() for v in value)
+                        else:
+                            raise TypeError(f'Unsupported loss value type {type(value)} for {name}')
+
+                        log_vars[name] = loss_value
+                        if 'loss' in name:
+                            total_loss += loss_value
+
+                    log_vars['loss'] = total_loss
+
+                    # Convert tensors to python scalars for logging
+                    log_vars = {k: v.item() if isinstance(v, torch.Tensor) else v for k, v in log_vars.items()}
+
+                    return total_loss, log_vars
+
+                raise TypeError(f'Unsupported losses type {type(losses)}')
+
+            # Bind as method to the model instance
+            inner_model.parse_losses = types.MethodType(_default_parse_losses, inner_model)  # type: ignore
+
+        # ----- Hooks & train step -----
+        self.call_hook('before_train_iter', batch_idx=self._inner_iter, data_batch=data_batch)
+        outputs = self.model.train_step(data_batch, self.optim_wrapper, **kwargs)
         if not isinstance(outputs, dict):
             raise TypeError('model.train_step() must return a dict')
         if 'log_vars' in outputs:
             self.log_buffer.update(outputs['log_vars'], outputs['num_samples'])
+
         self.outputs = outputs
-        self.call_hook('after_train_iter')
-        self._inner_iter += 1
-        self._iter += 1
+        self.call_hook('after_train_iter', batch_idx=self._inner_iter, data_batch=data_batch, outputs=outputs)
+
+        # Update counters
+        self._inner_iter += 1  # type: ignore
+        self._iter += 1  # type: ignore
+
+    # ------------------------------------------------------------------
+    # Legacy MMCV compat: provide a ``run`` method that executes training
+    # according to ``workflow``.  Most configs in this repo use
+    # ``workflow = [('train', 1)]`` which means running training for the
+    # entire iteration budget.  We therefore implement a minimal version
+    # that handles this common case; other phases (val/test) are ignored.
+    # ------------------------------------------------------------------
+    def run(self, data_loaders, workflow, **kwargs):  # type: ignore
+        """Execute the workflow.
+
+        Args:
+            data_loaders (list): list of dataloaders, the first element is
+                used for training.
+            workflow (list[tuple]): e.g. [('train', 1)]. Only 'train' phase
+                is respected in this lightweight wrapper.
+        """
+        assert isinstance(data_loaders, (list, tuple)) and len(data_loaders) > 0, \
+            'data_loaders must be non-empty list/tuple'
+        assert isinstance(workflow, list) and len(workflow) > 0, \
+            'workflow must be non-empty list'
+
+        # Currently only support patterns like [('train', N)] where N>0
+        phase, _ = workflow[0]
+        if phase != 'train':
+            raise NotImplementedError('MyRunnerWrapper only supports train workflow')
+
+        train_loader = data_loaders[0]
+
+        # Initialise counters at the beginning of training
+        self._iter = 0  # type: ignore
+        self._epoch = 0  # type: ignore
+
+        # Call run-start & epoch-start hooks
+        self.call_hook('before_run')
+        self.call_hook('before_train')
+        self.call_hook('before_train_epoch')
+
+        # Only support pure train workflow; validation occurs via EvalHook.
+        try:
+            while self._iter < self.max_iters:  # type: ignore
+                self.train(train_loader)
+        finally:
+            # Ensure run-end hooks are executed even if an error occurs
+            self.call_hook('after_run')
 
 
 def custom_train_detector(model,
@@ -60,39 +273,6 @@ def custom_train_detector(model,
                    eval_model=None,
                    meta=None):
     logger = get_root_logger(cfg.log_level)
-
-    # prepare data loaders
-   
-    dataset = dataset if isinstance(dataset, (list, tuple)) else [dataset]
-    #assert len(dataset)==1s
-    if 'imgs_per_gpu' in cfg.data:
-        logger.warning('"imgs_per_gpu" is deprecated in MMDet V2.0. '
-                       'Please use "samples_per_gpu" instead')
-        if 'samples_per_gpu' in cfg.data:
-            logger.warning(
-                f'Got "imgs_per_gpu"={cfg.data.imgs_per_gpu} and '
-                f'"samples_per_gpu"={cfg.data.samples_per_gpu}, "imgs_per_gpu"'
-                f'={cfg.data.imgs_per_gpu} is used in this experiments')
-        else:
-            logger.warning(
-                'Automatically set "samples_per_gpu"="imgs_per_gpu"='
-                f'{cfg.data.imgs_per_gpu} in this experiments')
-        cfg.data.samples_per_gpu = cfg.data.imgs_per_gpu
-
-    data_loaders = [
-        build_dataloader(
-            ds,
-            cfg.data.samples_per_gpu,
-            cfg.data.workers_per_gpu,
-            # cfg.gpus will be ignored if distributed
-            len(cfg.gpu_ids),
-            dist=distributed,
-            seed=cfg.seed,
-            shuffler_sampler=cfg.data.shuffler_sampler,  # dict(type='DistributedGroupSampler'),
-            nonshuffler_sampler=cfg.data.nonshuffler_sampler,  # dict(type='DistributedSampler'),
-            runner_type=cfg.runner,
-        ) for ds in dataset
-    ]
 
     # put model on gpus
     if distributed:
@@ -117,113 +297,76 @@ def custom_train_detector(model,
             eval_model = MMDataParallel(
                 eval_model.cuda(cfg.gpu_ids[0]), device_ids=cfg.gpu_ids)
 
+    # ---- Build Runner via MMEngine Registry ----
+    runner = RUNNERS.build(cfg)
+    print(f"runner type: {type(runner)}")
 
-    # build runner
-    optimizer = build_optimizer(model, cfg.optimizer)
-
-    if 'runner' not in cfg:
-        cfg.runner = {
-            'type': 'EpochBasedRunner',
-            'max_epochs': cfg.total_epochs
-        }
-        warnings.warn(
-            'config is now expected to have a `runner` section, '
-            'please set `runner` in your config.', UserWarning)
-    else:
-        if 'total_epochs' in cfg:
-            assert cfg.total_epochs == cfg.runner.max_epochs
+    # Preserve eval_model reference if provided (avoid messing with Runner.__init__ signature)
     if eval_model is not None:
-        runner = build_runner(
-            cfg.runner,
-            default_args=dict(
-                model=model,
-                eval_model=eval_model,
-                optimizer=optimizer,
-                work_dir=cfg.work_dir,
-                logger=logger,
-                meta=meta))
-    else:
-        runner = build_runner(
-            cfg.runner,
-            default_args=dict(
-                model=model,
-                optimizer=optimizer,
-                work_dir=cfg.work_dir,
-                logger=logger,
-                meta=meta))
+        runner.eval_model = eval_model
 
-    # an ugly workaround to make .log and .log.json filenames the same
-    runner.timestamp = timestamp
+    # ---------------- Debug optimizer / optim_wrapper -----------------
+    def wrapper_info(w):
+        """Return a dict of all attributes except the heavy `optimizer` one."""
+        return {k: v for k, v in w.__dict__.items() if k != 'optimizer'}
+
+    # ------------------------------------------------------------------
+    # Ensure `optim_wrapper` and `param_schedulers` are fully built **before**
+    # the training loop starts.  In the vanilla MMEngine workflow this is
+    # done inside `Runner.train()`, but our custom training pipeline skips
+    # that call, so we replicate the essential steps here.
+    # ------------------------------------------------------------------
+    from mmengine.config import ConfigDict
+
+    if isinstance(runner.optim_wrapper, (dict, ConfigDict)):
+        runner.optim_wrapper = runner.build_optim_wrapper(runner.optim_wrapper)  # type: ignore
+
+        # Auto-scale learning rate if the config requests it.
+        if hasattr(runner, 'auto_scale_lr'):
+            runner.scale_lr(runner.optim_wrapper, runner.auto_scale_lr)  # type: ignore
+
+    if runner.param_schedulers is not None and isinstance(
+            runner.param_schedulers, (dict, list, ConfigDict)):
+        runner.param_schedulers = runner.build_param_scheduler(runner.param_schedulers)  # type: ignore
+
+    # Initialise the internal counters of OptimWrapper (needed for grad-accum etc.)
+    if hasattr(runner.optim_wrapper, 'initialize_count_status'):
+        runner.optim_wrapper.initialize_count_status(runner.model, 0, runner.max_iters)  # type: ignore
+
+    print('\n=== DEBUG: Runner Optimizer Info ===')
+    # 1) runner.optim_wrapper：MMEngine 推荐的封装
+    print('runner.optim_wrapper ->', type(runner.optim_wrapper))
+    pprint.pprint(wrapper_info(runner.optim_wrapper))
+
 
     # fp16 setting
     fp16_cfg = cfg.get('fp16', None)
     if fp16_cfg is not None:
-        optimizer_config = Fp16OptimizerHook(
-            **cfg.optimizer_config, **fp16_cfg, distributed=distributed)
-    elif distributed and 'type' not in cfg.optimizer_config:
-        optimizer_config = OptimizerHook(**cfg.optimizer_config)
-    else:
-        optimizer_config = cfg.optimizer_config
+        raise ValueError("fp16_cfg is not supported in this codebase")
 
-    # register hooks
-    runner.register_training_hooks(cfg.lr_config, optimizer_config,
-                                   cfg.checkpoint_config, cfg.log_config,
-                                   cfg.get('momentum_config', None))
-    
-    # register profiler hook
-    #trace_config = dict(type='tb_trace', dir_name='work_dir')
-    #profiler_config = dict(on_trace_ready=trace_config)
-    #runner.register_profiler_hook(profiler_config)
-    
-    if distributed:
-        if isinstance(runner, EpochBasedRunner):
-            runner.register_hook(DistSamplerSeedHook())
-
-    # register eval hooks
-    if validate:
-        # Support batch_size > 1 in validation
-        val_samples_per_gpu = cfg.data.val.pop('samples_per_gpu', 1)
-        if val_samples_per_gpu > 1:
-            assert False
-            # Replace 'ImageToTensor' to 'DefaultFormatBundle'
-            cfg.data.val.pipeline = replace_ImageToTensor(
-                cfg.data.val.pipeline)
-        val_dataset = build_dataset(cfg.data.val, dict(test_mode=True))
-        
-        val_dataloader = build_dataloader(
-            val_dataset,
-            samples_per_gpu=val_samples_per_gpu,
-            workers_per_gpu=cfg.data.workers_per_gpu,
-            dist=distributed,
-            shuffle=False,
-            shuffler_sampler=cfg.data.shuffler_sampler,  # dict(type='DistributedGroupSampler'),
-            nonshuffler_sampler=cfg.data.nonshuffler_sampler,  # dict(type='DistributedSampler'),
-        )
-        eval_cfg = cfg.get('evaluation', {})
-        #eval_cfg['by_epoch'] = cfg.runner['type'] != 'IterBasedRunner'
-        eval_cfg['by_epoch'] = not isinstance(runner, IterBasedRunner)
-        eval_cfg['jsonfile_prefix'] = osp.join('val', cfg.work_dir, time.ctime().replace(' ','_').replace(':','_'))
-        eval_hook = CustomDistEvalHook if distributed else EvalHook
-
-        runner.register_hook(eval_hook(val_dataloader, **eval_cfg), priority='LOW')
-
-    # user-defined hooks
-    if cfg.get('custom_hooks', None):
-        custom_hooks = cfg.custom_hooks
-        assert isinstance(custom_hooks, list), \
-            f'custom_hooks expect list type, but got {type(custom_hooks)}'
-        for hook_cfg in cfg.custom_hooks:
-            assert isinstance(hook_cfg, dict), \
-                'Each item in custom_hooks expects dict type, but got ' \
-                f'{type(hook_cfg)}'
-            hook_cfg = hook_cfg.copy()
-            priority = hook_cfg.pop('priority', 'NORMAL')
-            hook = build_from_cfg(hook_cfg, HOOKS)
-            runner.register_hook(hook, priority=priority)
+    # 打印所有已注册的hooks信息（放在最后，确保包含所有hooks）
+    if getattr(runner, 'rank', 0) == 0:  # 多卡时只让 rank0 打印
+        print('\n===== DEBUG: ALL REGISTERED HOOKS =====')
+        eval_hook_found = False
+        for idx, hook in enumerate(runner.hooks):
+            hook_type = hook.__class__.__name__
+            priority = hook.priority
+            interval = getattr(hook, 'interval', 'N/A')
+            by_epoch = getattr(hook, 'by_epoch', 'N/A')
+            print(f'[{idx:02d}] {hook_type:25s}  interval={str(interval):<6}  by_epoch={str(by_epoch):<5}  priority={priority}')
+            if 'Eval' in hook_type:
+                eval_hook_found = True
+        if eval_hook_found:
+            print("✓ Eval hook found in registered hooks!")
+        else:
+            print("✗ No eval hook found in registered hooks!")
+        print('========================================')
 
     if cfg.resume_from:
         runner.resume(cfg.resume_from)
     elif cfg.load_from:
         runner.load_checkpoint(cfg.load_from)
+
+    data_loaders = [runner.train_dataloader]
     runner.run(data_loaders, cfg.workflow)
 

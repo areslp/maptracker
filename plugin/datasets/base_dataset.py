@@ -4,13 +4,13 @@ import os.path as osp
 import mmcv
 from .evaluation.raster_eval import RasterEvaluate
 from .evaluation.vector_eval import VectorEvaluate
-from mmdet3d.datasets.pipelines import Compose
-from mmdet.datasets import DATASETS
+from mmcv.transforms.wrappers import Compose
+from mmdet.registry import DATASETS
 from torch.utils.data import Dataset
-from mmcv.parallel import DataContainer as DC
+from legacy.data_container import DataContainer as DC
 import warnings
 import pickle
-
+from mmengine.fileio import dump
 
 warnings.filterwarnings("ignore")
 
@@ -221,6 +221,7 @@ class BaseMapDataset(Dataset):
                 single_case = {'vectors': [], 'scores': [], 'labels': [], 'props': [],
                         'track_vectors': [], 'track_scores': [], 'track_labels': []}
                 token = pred['token']
+                # print(f"token: {token}")
                 roi_size = np.array(self.roi_size)
                 origin = -np.array([self.roi_size[0]/2, self.roi_size[1]/2])
                 

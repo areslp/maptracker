@@ -10,6 +10,9 @@ from os import path as osp
 import os
 from av2.datasets.sensor.av2_sensor_dataloader import AV2SensorDataLoader
 import argparse
+from av2.map.map_api import ArgoverseStaticMap
+from tqdm import tqdm
+from mmengine.fileio import dump
 
 
 CAM_NAMES = ['ring_front_center', 'ring_front_right', 'ring_front_left',
@@ -130,7 +133,7 @@ def create_av2_infos_mp(root_path,
         info_path = osp.join(dest_path,
                                     '{}_map_infos_{}.pkl'.format(info_prefix, split))
     print(f'saving results to {info_path}')
-    mmcv.dump(infos, info_path)
+    dump(infos, info_path)
 
 def get_data_from_logid(log_id, loaders, data_root):
     samples = []

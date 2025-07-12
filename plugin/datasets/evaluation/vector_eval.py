@@ -1,7 +1,6 @@
 from functools import partial
 import numpy as np
 from multiprocessing import Pool
-from mmdet3d.datasets import build_dataset, build_dataloader
 import mmcv
 from .AP import instance_match, average_precision
 import prettytable
@@ -11,9 +10,11 @@ from shapely.geometry import LineString
 from numpy.typing import NDArray
 from typing import Dict, List, Optional
 from logging import Logger
-from mmcv import Config
+from mmengine.config import Config
 from copy import deepcopy
 import os
+import tempfile
+from mmengine.fileio import dump
 
 INTERP_NUM = 200 # number of points to interpolate during evaluation
 THRESHOLDS = [0.5, 1.0, 1.5] # AP thresholds
@@ -30,6 +31,9 @@ class VectorEvaluate(object):
     """
 
     def __init__(self, dataset_cfg: Config, n_workers: int=N_WORKERS) -> None:
+        # 延迟导入，避免循环依赖
+        from mmdet3d.datasets import build_dataset, build_dataloader
+        
         self.dataset = build_dataset(dataset_cfg)
         self.cat2id = self.dataset.cat2id
         self.id2cat = {v: k for k, v in self.cat2id.items()}
@@ -43,6 +47,9 @@ class VectorEvaluate(object):
         
     @cached_property
     def gts(self) -> Dict[str, Dict[int, List[NDArray]]]:
+        # 延迟导入，避免循环依赖  
+        from mmdet3d.datasets import build_dataloader
+        
         roi_size = self.dataset.roi_size
         if 'av2' in self.dataset.ann_file:
             dataset = 'av2'
@@ -71,7 +78,7 @@ class VectorEvaluate(object):
         
         if not os.path.exists(tmp_file):
             print(f"saving gt to {tmp_file}")
-            mmcv.dump(gts, tmp_file)
+            dump(gts, tmp_file)
         return gts
     
     def interp_fixed_num(self, 
@@ -285,7 +292,7 @@ class VectorEvaluate(object):
                 round(result_dict[self.id2cat[label]]['AP'], 4),
             ])
         
-        from mmcv.utils import print_log
+        from mmengine.logging import print_log
         print_log('\n'+str(table), logger=logger)
         mAP_normal = 0
         for label in self.id2cat.keys():

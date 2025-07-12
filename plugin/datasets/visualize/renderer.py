@@ -181,9 +181,19 @@ class Renderer(object):
                     mid_idx = len(x) // 2
                     ax.text(x[mid_idx], y[mid_idx], f'{cat[:1].upper()}{vec_id}', fontsize=100, color=color)
                     
-        #plt.savefig(map_path, bbox_inches='tight', dpi=40)
+        # Save and properly close the figure to free memory.
+        # ``plt.clf`` only clears the current figure contents but the Figure
+        # object (and its large canvas) remains alive in Matplotlib's global
+        # state.  Over hundreds of scenes this results in significant memory
+        # growth eventually leading to the process being *Killed* by the
+        # operating system (OOM).  Using ``plt.close(fig)`` fully releases
+        # the resources associated with this figure.
+
+        # plt.savefig(map_path, bbox_inches='tight', dpi=40)
         fig.savefig(map_path, bbox_inches='tight', dpi=20)
-        plt.clf()  # or cla() to simulate use case of plotting fresh figures
+
+        # Free memory held by the figure.
+        plt.close(fig)
         
     def render_camera_views_from_vectors(self, vectors, imgs, extrinsics, 
             intrinsics, ego2cams, thickness, out_dir):

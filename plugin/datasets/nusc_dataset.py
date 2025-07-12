@@ -1,6 +1,6 @@
 from.base_dataset import BaseMapDataset
 from .map_utils.nuscmap_extractor import NuscMapExtractor
-from mmdet.datasets import DATASETS
+from mmdet.registry import DATASETS
 import numpy as np
 from .visualize.renderer import Renderer
 import mmcv

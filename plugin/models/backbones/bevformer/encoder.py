@@ -6,15 +6,12 @@ from .custom_base_transformer_layer import MyCustomBaseTransformerLayer
 from .temporal_net import TemporalNet
 import copy
 import warnings
-from mmcv.cnn.bricks.registry import (ATTENTION,
-                                      TRANSFORMER_LAYER,
-                                      TRANSFORMER_LAYER_SEQUENCE)
+from mmengine.registry import MODELS
 from mmcv.cnn.bricks.transformer import TransformerLayerSequence
-from mmcv.runner import force_fp32, auto_fp16
 import numpy as np
 import torch
 import torch.nn as nn
-from mmcv.utils import TORCH_VERSION, digit_version
+from mmengine.utils import digit_version
 from mmcv.utils import ext_loader
 
 from einops import rearrange
@@ -23,7 +20,7 @@ ext_module = ext_loader.load_ext(
     '_ext', ['ms_deform_attn_backward', 'ms_deform_attn_forward'])
 
 
-@TRANSFORMER_LAYER_SEQUENCE.register_module()
+@MODELS.register_module()
 class BEVFormerEncoder(TransformerLayerSequence):
 
     """
@@ -98,7 +95,6 @@ class BEVFormerEncoder(TransformerLayerSequence):
             return ref_2d
 
     # This function must use fp32!!!
-    @force_fp32(apply_to=('reference_points', 'img_metas'))
     def point_sampling(self, reference_points, pc_range, img_metas):
 
         ego2img = []
@@ -143,7 +139,7 @@ class BEVFormerEncoder(TransformerLayerSequence):
                     & (reference_points_cam[..., 1:2] < 1.0)
                     & (reference_points_cam[..., 0:1] < 1.0)
                     & (reference_points_cam[..., 0:1] > 0.0))
-        if digit_version(TORCH_VERSION) >= digit_version('1.8'):
+        if digit_version(torch.__version__) >= digit_version('1.8'):
             bev_mask = torch.nan_to_num(bev_mask)
         else:
             bev_mask = bev_mask.new_tensor(
@@ -154,7 +150,6 @@ class BEVFormerEncoder(TransformerLayerSequence):
 
         return reference_points_cam, bev_mask
 
-    @auto_fp16()
     def forward(self,
                 bev_query,
                 key,
@@ -255,7 +250,7 @@ class BEVFormerEncoder(TransformerLayerSequence):
         return output
 
 
-@TRANSFORMER_LAYER.register_module()
+@MODELS.register_module()
 class BEVFormerLayer(MyCustomBaseTransformerLayer):
     """Implements decoder layer in DETR transformer.
     Args:

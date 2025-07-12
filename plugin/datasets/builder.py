@@ -10,14 +10,14 @@ from functools import partial
 
 import numpy as np
 from mmcv.parallel import collate
-from mmcv.runner import get_dist_info
-from mmcv.utils import Registry, build_from_cfg
+from mmengine.dist import get_dist_info
+from mmengine.registry import Registry, build_from_cfg
 from torch.utils.data import DataLoader
 
-from mmdet.datasets.samplers import GroupSampler
-from .samplers.group_sampler import DistributedGroupSampler
-from .samplers.distributed_sampler import DistributedSampler
-from .samplers.group_sampler import InfiniteGroupEachSampleInBatchSampler
+from legacy.group_sampler import GroupSampler
+from plugin.datasets.samplers.group_sampler import DistributedGroupSampler
+from plugin.datasets.samplers.distributed_sampler import DistributedSampler
+from plugin.datasets.samplers.group_sampler import InfiniteGroupEachSampleInBatchSampler
 from .samplers.sampler import build_sampler
 
 def build_dataloader(dataset,
@@ -86,7 +86,7 @@ def build_dataloader(dataset,
         batch_sampler = None
 
     # True entry here!!!
-    if runner_type['type'] == 'IterBasedRunner' and shuffler_sampler['type'] =='InfiniteGroupEachSampleInBatchSampler':
+    if runner_type['runner_type'] == 'IterBasedRunner' and shuffler_sampler['type'] =='InfiniteGroupEachSampleInBatchSampler':
         # TODO: original has more options, but I'm not using them 
         # https://github.com/open-mmlab/mmdetection/blob/3b72b12fe9b14de906d1363982b9fba05e7d47c1/mmdet/datasets/builder.py#L145-L157
         batch_sampler = build_sampler(shuffler_sampler, dict(

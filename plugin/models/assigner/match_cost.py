@@ -1,10 +1,12 @@
 import torch
-from mmdet.core.bbox.match_costs.builder import MATCH_COST
-from mmdet.core.bbox.match_costs import build_match_cost
+import torch.nn as nn
+from mmengine.structures import InstanceData
+
+from mmdet.models.task_modules.builder import MATCH_COSTS as MATCH_COST
+from mmdet.models.task_modules.builder import build_match_cost
 from torch.nn.functional import smooth_l1_loss
 
-from mmdet.core.bbox.iou_calculators import bbox_overlaps
-from mmdet.core.bbox.transforms import bbox_cxcywh_to_xyxy
+from mmdet.structures.bbox import bbox_overlaps, bbox_cxcywh_to_xyxy
 def chamfer_distance(line1, line2) -> float:
     ''' Calculate chamfer distance between two lines. Make sure the 
     lines are interpolated.
@@ -376,7 +378,9 @@ class MapQueriesCost(object):
     def __call__(self, preds: dict, gts: dict):
 
         # classification and bboxcost.
-        cls_cost = self.cls_cost(preds['scores'], gts['labels'])
+        pred_instances = InstanceData(scores=preds['scores'])
+        gt_instances = InstanceData(labels=gts['labels'])
+        cls_cost = self.cls_cost(pred_instances, gt_instances)
 
         # regression cost
         regkwargs = {}

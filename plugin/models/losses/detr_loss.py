@@ -5,10 +5,10 @@ from mmdet.models.losses import l1_loss, smooth_l1_loss
 from mmdet.models.losses.utils import weighted_loss
 import mmcv
 
-from mmdet.models.builder import LOSSES
+from mmdet.registry import MODELS
 
 
-@LOSSES.register_module()
+@MODELS.register_module()
 class LinesL1Loss(nn.Module):
 
     def __init__(self, reduction='mean', loss_weight=1.0, beta=0.5):
@@ -64,7 +64,6 @@ class LinesL1Loss(nn.Module):
         return loss*self.loss_weight
 
 
-@mmcv.jit(derivate=True, coderize=True)
 @weighted_loss
 def bce(pred, label, class_weight=None):
     """
@@ -82,7 +81,7 @@ def bce(pred, label, class_weight=None):
     return loss
 
 
-@LOSSES.register_module()
+@MODELS.register_module()
 class MasksLoss(nn.Module):
 
     def __init__(self, reduction='mean', loss_weight=1.0):
@@ -109,7 +108,6 @@ class MasksLoss(nn.Module):
 
         return loss*self.loss_weight
 
-@mmcv.jit(derivate=True, coderize=True)
 @weighted_loss
 def ce(pred, label, class_weight=None):
     """
@@ -126,7 +124,7 @@ def ce(pred, label, class_weight=None):
     return loss
 
 
-@LOSSES.register_module()
+@MODELS.register_module()
 class LenLoss(nn.Module):
 
     def __init__(self, reduction='mean', loss_weight=1.0):

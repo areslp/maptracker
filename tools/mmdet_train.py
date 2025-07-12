@@ -3,15 +3,18 @@ import warnings
 
 import numpy as np
 import torch
-from mmcv.parallel import MMDataParallel, MMDistributedDataParallel
+from mmengine.model.wrappers import MMDistributedDataParallel
+from torch.nn import DataParallel as MMDataParallel
 from mmcv.runner import (HOOKS, DistSamplerSeedHook, EpochBasedRunner,
                          Fp16OptimizerHook, OptimizerHook, build_optimizer,
                          build_runner)
-from mmcv.utils import build_from_cfg
+from mmengine.registry import build_from_cfg
 
-from mmdet.core import DistEvalHook, EvalHook
+# 移除 DistEvalHook 和 EvalHook 导入，统一使用 CustomDistEvalHook
 from mmdet.datasets import (build_dataloader, build_dataset,
                             replace_ImageToTensor)
+# 导入 CustomDistEvalHook 以替代有问题的 EvalHook  
+from plugin.core.evaluation.eval_hooks import CustomDistEvalHook
 from mmdet.utils import get_root_logger
 
 
@@ -146,7 +149,7 @@ def train_detector(model,
             shuffle=False)
         eval_cfg = cfg.get('evaluation', {})
         eval_cfg['by_epoch'] = cfg.runner['type'] != 'IterBasedRunner'
-        eval_hook = DistEvalHook if distributed else EvalHook
+        eval_hook = CustomDistEvalHook  # 统一使用 CustomDistEvalHook，它继承自正确的 DistEvalHook 实现
         runner.register_hook(eval_hook(val_dataloader, **eval_cfg))
 
     # user-defined hooks
